@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
-import LiquidMetalButton, { LiquidMetal } from '@/components/ui/liquid-metal';
+
 
 /* ================================================================
    TYPES
@@ -59,18 +59,7 @@ export default function SubjectDetailPage() {
 
   return (
     <div className="animate-fade-in relative min-h-[calc(100vh-80px)]">
-      {/* Full page liquid background */}
-      <div className="fixed inset-0 z-[-1] pointer-events-none overflow-hidden" style={{ top: 0, left: 0, right: 0, bottom: 0 }}>
-        <LiquidMetal
-          colorBack="#0ea5e9"
-          colorTint="#a855f7"
-          speed={0.2}
-          repetition={2}
-          distortion={0.3}
-          scale={2}
-          style={{ opacity: 0.6, width: '100vw', height: '100vh' }}
-        />
-      </div>
+
 
       {/* Subject Header */}
       <div style={{ marginBottom: 24, padding: 24, background: 'rgba(255, 255, 255, 0.05)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: 16, border: '1px solid rgba(255, 255, 255, 0.1)' }}>
@@ -659,9 +648,9 @@ function FacultyAttendance({ subjectId }: { subjectId: string }) {
         </div>
       ) : (
         <div style={{ marginBottom: 24 }}>
-          <LiquidMetalButton type="button" onClick={startSession} disabled={starting}>
+          <button className="btn btn-primary" type="button" onClick={startSession} disabled={starting}>
             {starting ? <><span className="spinner" /> Getting GPS...</> : '📍 Start Attendance Session'}
-          </LiquidMetalButton>
+          </button>
         </div>
       )}
 
@@ -758,9 +747,9 @@ function StudentAttendance({ subjectId }: { subjectId: string }) {
                 required
               />
             </div>
-            <LiquidMetalButton type="submit" disabled={marking}>
+            <button className="btn btn-primary" type="submit" disabled={marking}>
               {marking ? <><span className="spinner" /> Getting location...</> : '📍 Mark Attendance'}
-            </LiquidMetalButton>
+            </button>
           </form>
         </div>
 

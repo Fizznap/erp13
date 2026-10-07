@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
-import { LiquidMetal, LiquidMetalButton } from '@/components/ui/liquid-metal';
 
 type Subject = {
   id: string;
@@ -75,20 +74,7 @@ export default function SubjectsPage() {
 
   return (
     <div className="animate-fade-in relative min-h-[calc(100vh-80px)]">
-      {/* Full page liquid background */}
-      <div className="fixed inset-0 z-[-1] pointer-events-none overflow-hidden" style={{ top: 0, left: 0, right: 0, bottom: 0 }}>
-        <LiquidMetal
-          colorBack="#0ea5e9"
-          colorTint="#a855f7"
-          speed={0.2}
-          repetition={2}
-          distortion={0.3}
-          scale={2}
-          style={{ opacity: 0.6, width: '100vw', height: '100vh' }}
-        />
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, padding: 24, background: 'rgba(255, 255, 255, 0.05)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: 16, border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700 }}>
             {user.role === 'student' ? 'All Subjects' : 'Your Subjects'}
@@ -98,22 +84,14 @@ export default function SubjectsPage() {
           </p>
         </div>
         {(user.role === 'faculty' || user.role === 'admin') && (
-          <LiquidMetalButton size="sm" onClick={() => setShowCreate(true)}>
+          <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)}>
             + New Subject
-          </LiquidMetalButton>
+          </button>
         )}
       </div>
 
-      {/* Create Subject Modal */}
       {showCreate && (
-        <div className="card animate-fade-in" style={{ 
-          marginBottom: 24, 
-          border: '1px solid rgba(255,255,255,0.3)',
-          background: 'rgba(255, 255, 255, 0.15)',
-          backdropFilter: 'blur(24px)',
-          WebkitBackdropFilter: 'blur(24px)',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-        }}>
+        <div className="card animate-fade-in" style={{ marginBottom: 24 }}>
           <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Create Subject</h3>
           <form onSubmit={handleCreate}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
@@ -125,7 +103,6 @@ export default function SubjectsPage() {
                   value={newSubject.name}
                   onChange={(e) => setNewSubject({ ...newSubject, name: e.target.value })}
                   placeholder="Introduction to CS"
-                  style={{ background: 'rgba(0,0,0,0.1)', border: '1px solid rgba(255,255,255,0.1)', color: 'inherit' }}
                   required
                 />
               </div>
@@ -137,7 +114,6 @@ export default function SubjectsPage() {
                   value={newSubject.code}
                   onChange={(e) => setNewSubject({ ...newSubject, code: e.target.value.toUpperCase() })}
                   placeholder="CS101"
-                  style={{ background: 'rgba(0,0,0,0.1)', border: '1px solid rgba(255,255,255,0.1)', color: 'inherit' }}
                   required
                 />
               </div>
@@ -150,15 +126,14 @@ export default function SubjectsPage() {
                 value={newSubject.description}
                 onChange={(e) => setNewSubject({ ...newSubject, description: e.target.value })}
                 placeholder="Brief description..."
-                style={{ background: 'rgba(0,0,0,0.1)', border: '1px solid rgba(255,255,255,0.1)', color: 'inherit' }}
                 rows={2}
               />
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowCreate(false)}>Cancel</button>
-              <LiquidMetalButton size="sm" type="submit" disabled={creating}>
+              <button className="btn btn-primary btn-sm" type="submit" disabled={creating}>
                 {creating ? <span className="spinner" /> : 'Create'}
-              </LiquidMetalButton>
+              </button>
             </div>
           </form>
         </div>
@@ -169,11 +144,7 @@ export default function SubjectsPage() {
           <div className="spinner" style={{ width: 28, height: 28 }} />
         </div>
       ) : subjects.length === 0 ? (
-        <div className="empty-state card" style={{
-          background: 'rgba(255, 255, 255, 0.1)',
-          backdropFilter: 'blur(20px)',
-          border: '1px solid rgba(255,255,255,0.1)',
-        }}>
+        <div className="empty-state card">
           <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>◈</div>
           <p>No subjects available</p>
         </div>
@@ -183,19 +154,12 @@ export default function SubjectsPage() {
             <div
               key={subject.id}
               className="card card-hover animate-fade-in"
-              style={{ 
-                animationDelay: `${i * 40}ms`,
-                background: 'rgba(255, 255, 255, 0.15)',
-                backdropFilter: 'blur(24px)',
-                WebkitBackdropFilter: 'blur(24px)',
-                border: '1px solid rgba(255,255,255,0.2)',
-                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-              }}
+              style={{ animationDelay: `${i * 40}ms` }}
             >
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
-                <span className="badge badge-default" style={{ background: 'rgba(255,255,255,0.2)', color: 'inherit' }}>{subject.code}</span>
+                <span className="badge badge-default">{subject.code}</span>
                 {user.role === 'student' && subject.is_enrolled && (
-                  <span className="badge badge-success" style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#22c55e' }}>Enrolled</span>
+                  <span className="badge badge-success">Enrolled</span>
                 )}
               </div>
               <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>{subject.name}</h3>
@@ -210,23 +174,22 @@ export default function SubjectsPage() {
               <div style={{ display: 'flex', gap: 8 }}>
                 {user.role === 'student' && !subject.is_enrolled ? (
                   <div style={{ flex: 1, display: 'flex' }}>
-                    <LiquidMetalButton
-                      size="sm"
-                      className="w-full justify-center"
+                    <button
+                      className="btn btn-primary btn-sm w-full justify-center"
                       onClick={() => handleEnroll(subject.id)}
                       disabled={enrolling === subject.id}
                     >
                       {enrolling === subject.id ? <span className="spinner" /> : 'Enroll'}
-                    </LiquidMetalButton>
+                    </button>
                   </div>
                 ) : (
                   <Link
                     href={`/dashboard/classroom/${subject.id}`}
                     style={{ flex: 1, textDecoration: 'none', display: 'flex' }}
                   >
-                    <LiquidMetalButton size="sm" className="w-full justify-center">
+                    <button className="btn btn-primary btn-sm w-full justify-center">
                       Open
-                    </LiquidMetalButton>
+                    </button>
                   </Link>
                 )}
               </div>
