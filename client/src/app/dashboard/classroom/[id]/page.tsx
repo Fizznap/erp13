@@ -23,7 +23,7 @@ type Session = {
   latitude: number; longitude: number;
   active_nonce?: string; nonce_expires?: string;
 };
-type AttRecord = { id: string; full_name: string; email: string; status: string; distance_meters: number; marked_at: string; rejection_reason: string };
+type AttRecord = { id: string; student_id: string; full_name: string; email: string; status: string; distance_meters: number; marked_at: string; rejection_reason: string };
 
 /* ================================================================
    MAIN PAGE
@@ -570,6 +570,19 @@ function FacultyAttendance({ subjectId }: { subjectId: string }) {
     }
   };
 
+  const handleOverride = async (studentId: string) => {
+    if (!activeSession) return;
+    try {
+      await api(`/attendance/${activeSession.id}/override`, {
+        method: 'POST',
+        body: { studentId, status: 'present', note: 'Faculty override (GPS issues)' }
+      });
+      fetchRecords(activeSession.id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to override');
+    }
+  };
+
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><div className="spinner" style={{ width: 28, height: 28 }} /></div>;
 
   return (
@@ -638,6 +651,15 @@ function FacultyAttendance({ subjectId }: { subjectId: string }) {
                         <span className={`badge ${r.status === 'present' ? 'badge-success' : 'badge-error'}`}>
                           {r.status}
                         </span>
+                        {r.status !== 'present' && (
+                          <button 
+                            className="btn btn-secondary btn-sm" 
+                            style={{ padding: '2px 8px', fontSize: 11 }}
+                            onClick={() => handleOverride(r.student_id)}
+                          >
+                            Accept
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
