@@ -27,6 +27,11 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
+// Health check (Exempt from rate limits for Render)
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 app.use('/api', apiLimiter);
 
 // Serve uploaded files (for admin/debug only)
@@ -39,11 +44,6 @@ app.use('/api/resources', require('./routes/resources'));
 app.use('/api/ask', require('./routes/ask'));
 app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/admin', require('./routes/admin'));
-
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
 
 // Global error handler
 app.use((err, req, res, next) => {
