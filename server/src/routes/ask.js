@@ -106,7 +106,8 @@ router.post('/', authenticate, authorize('student', 'faculty'), ragLimiter, asyn
     const llmResp = await generateAnswer({ 
       question: query, 
       numberedContext, 
-      systemPrompt: `You are a strict assistant. Answer ONLY using the numbered chunks in the context. If the answer cannot be found in the context, return EXACTLY: "Not in provided material." Include citations like [1] inline. Be concise. Subject: ${subjectName}` 
+      temperature: 0.2,
+      systemPrompt: `You are a helpful, conversational teaching assistant for the subject "${subjectName}". Provide a comprehensive, detailed, and well-structured explanation based ONLY on the numbered chunks in the context provided. Use markdown for better readability. If the answer cannot be found in the context at all, return EXACTLY: "Not in provided material." ALWAYS include citations like [1] inline.` 
     });
     const result = {
       answer: llmResp.answer || 'Not in provided material.',
