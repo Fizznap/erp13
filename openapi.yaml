@@ -1,0 +1,68 @@
+openapi: 3.0.0
+info:
+  title: Snippet Campus ERP API
+  version: 1.0.0
+servers:
+  - url: https://api.snippet.app/v1
+
+paths:
+  /auth/login:
+    post:
+      summary: Authenticate user
+      responses:
+        '200': { description: OK }
+        
+  /subjects:
+    get:
+      summary: List enrolled subjects
+      responses:
+        '200': { description: OK }
+
+  /resources/upload:
+    post:
+      summary: Upload PDF resource (async processing)
+      responses:
+        '202': { description: Accepted for processing }
+
+  /ask:
+    post:
+      summary: Ask a RAG question
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query: { type: string }
+                subjectId: { type: string }
+      responses:
+        '200': { description: Answer with citations array }
+
+  /attendance/{sessionId}/mark:
+    post:
+      summary: Mark GPS attendance
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                latitude: { type: number }
+                longitude: { type: number }
+                nonce: { type: string }
+                deviceId: { type: string }
+      responses:
+        '200': { description: Present }
+        '400': { description: Too far or invalid }
+
+  /webhooks/erp/sync/subjects:
+    post:
+      summary: Sync OpenEduCat subjects
+      responses:
+        '200': { description: OK }
+
+  /webhooks/erp/sync/enrollments:
+    post:
+      summary: Sync OpenEduCat enrollments
+      responses:
+        '200': { description: OK }

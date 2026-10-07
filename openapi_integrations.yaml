@@ -1,0 +1,73 @@
+openapi: 3.0.0
+info:
+  title: Snippet ERP Integration API (OpenEduCat Ref)
+  description: OpenAPI specifications for integrating Snippet with existing ERP modules (e.g. OpenEduCat)
+  version: 1.0.0
+servers:
+  - url: https://api.snippet.app/v1
+paths:
+  /webhooks/erp/sync/subjects:
+    post:
+      summary: Sync subjects from ERP (e.g. OpenEduCat Classroom/Timetable)
+      operationId: syncSubjects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/SubjectSync'
+      responses:
+        '200':
+          description: Subjects synchronized successfully
+  /webhooks/erp/sync/enrollments:
+    post:
+      summary: Sync student enrollments from ERP
+      operationId: syncEnrollments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/EnrollmentSync'
+      responses:
+        '200':
+          description: Enrollments synchronized
+  /webhooks/erp/attendance/export:
+    get:
+      summary: Export attendance data back to ERP format
+      operationId: exportAttendance
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: CSV/JSON payload matching OpenEduCat Attendance import format
+
+components:
+  schemas:
+    SubjectSync:
+      type: object
+      properties:
+        erp_subject_id:
+          type: string
+        name:
+          type: string
+        code:
+          type: string
+        faculty_email:
+          type: string
+    EnrollmentSync:
+      type: object
+      properties:
+        student_email:
+          type: string
+        erp_subject_id:
+          type: string
