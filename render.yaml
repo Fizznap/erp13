@@ -1,20 +1,18 @@
-# Render Blueprint — Infrastructure-as-Code for Snippet backend
-# Deploy: connect the GitHub repo → Render auto-discovers this file.
+# Render Blueprint — Free Tier Architecture
 
 databases:
   - name: snippet-db
-    plan: starter           # Starter plan (1 GB, supports extensions)
+    plan: free           # Free Postgres (expires in 90 days, enough for testing)
     databaseName: snippet
     user: snippet
     postgresMajorVersion: "16"
-    ipAllowList: []         # Allow from Render services only
 
 services:
-  # ── Express API Server ──────────────────────────────────────
+  # ── Express API Server (Free Tier) ──────────────────────────
   - type: web
     name: snippet-api
     runtime: node
-    plan: starter
+    plan: free           # Free Web Service (spins down after inactivity)
     region: oregon
     rootDir: server
     buildCommand: npm ci --production
@@ -30,25 +28,20 @@ services:
         fromDatabase:
           name: snippet-db
           property: connectionString
-      - key: REDIS_URL
-        fromService:
-          name: snippet-redis
-          type: redis
-          property: connectionString
       - key: GOOGLE_AI_API_KEY
         sync: false          # set manually in Render dashboard
       - key: LLM_PROVIDER
         value: google
       - key: JWT_SECRET
-        generateValue: true  # auto-generate secure random
+        generateValue: true
       - key: JWT_EXPIRES_IN
         value: "15m"
       - key: JWT_REFRESH_EXPIRES_IN
         value: "7d"
       - key: CLIENT_URL
-        sync: false          # set to Vercel URL after deploying frontend
+        sync: false          # set to Vercel URL
       - key: UPLOAD_DIR
-        value: /data/uploads
+        value: ./uploads     # Ephemeral storage (fine since PDFs are only needed during processing)
       - key: MAX_FILE_SIZE
         value: "20971520"
       - key: SIMILARITY_THRESHOLD
@@ -63,56 +56,4 @@ services:
         value: gemini-3.5-flash
       - key: GOOGLE_AI_MAX_OUTPUT_TOKENS
         value: "800"
-    disk:
-      name: uploads
-      mountPath: /data/uploads
-      sizeGB: 1
 
-  # ── Bull Worker (background job processor) ──────────────────
-  - type: worker
-    name: snippet-worker
-    runtime: node
-    plan: starter
-    region: oregon
-    rootDir: server
-    buildCommand: npm ci --production
-    startCommand: node src/services/worker.js
-    autoDeploy: true
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: DATABASE_URL
-        fromDatabase:
-          name: snippet-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          name: snippet-redis
-          type: redis
-          property: connectionString
-      - key: GOOGLE_AI_API_KEY
-        sync: false
-      - key: LLM_PROVIDER
-        value: google
-      - key: UPLOAD_DIR
-        value: /data/uploads
-      - key: CHUNK_SIZE_TOKENS
-        value: "512"
-      - key: CHUNK_OVERLAP_TOKENS
-        value: "50"
-      - key: GOOGLE_AI_MODEL
-        value: gemini-3.5-flash
-      - key: GOOGLE_AI_MAX_OUTPUT_TOKENS
-        value: "800"
-    disk:
-      name: uploads
-      mountPath: /data/uploads
-      sizeGB: 1
-
-  # ── Redis ────────────────────────────────────────────────────
-  - type: redis
-    name: snippet-redis
-    plan: starter
-    region: oregon
-    ipAllowList: []
-    maxmemoryPolicy: allkeys-lru
