@@ -193,9 +193,20 @@ function ResourcesTab({ subjectId, userRole }: { subjectId: string; userRole: st
                 <span>{(selectedResource.file_size / 1024 / 1024).toFixed(1)} MB</span>
               </div>
             </div>
-            {userRole === 'faculty' && (
-              <button className="btn btn-danger btn-sm" onClick={() => handleDelete(selectedResource.id)}>Delete</button>
-            )}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button 
+                className="btn btn-primary btn-sm" 
+                onClick={() => {
+                  const token = localStorage.getItem('token');
+                  window.open(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api'}/resources/${selectedResource.id}/download?token=${token}`, '_blank');
+                }}
+              >
+                View PDF
+              </button>
+              {userRole === 'faculty' && (
+                <button className="btn btn-danger btn-sm" onClick={() => handleDelete(selectedResource.id)}>Delete</button>
+              )}
+            </div>
           </div>
 
           {selectedResource.summary && (

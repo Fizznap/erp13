@@ -211,4 +211,24 @@ router.post('/:id/process', authenticate, authorize('faculty', 'admin'), async (
   }
 });
 
+// GET /api/resources/:id/download — download the original PDF
+router.get('/:id/download', authenticate, async (req, res) => {
+  try {
+    const resource = await pool.query('SELECT * FROM resources WHERE id = $1', [req.params.id]);
+    if (resource.rows.length === 0) {
+      return res.status(404).json({ error: 'Resource not found' });
+    }
+
+    const filePath = resource.rows[0].file_path;
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).send('File is no longer available in ephemeral storage. It may have been cleared by a server restart.');
+    }
+
+    res.download(filePath, resource.rows[0].original_name);
+  } catch (err) {
+    console.error('Download error:', err);
+    res.status(500).json({ error: 'Failed to download file' });
+  }
+});
+
 module.exports = router;
