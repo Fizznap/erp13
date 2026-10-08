@@ -20,7 +20,7 @@ services:
     region: oregon
     rootDir: server
     buildCommand: npm ci --production
-    startCommand: node src/index.js
+    startCommand: npm run db:init && node src/index.js
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
