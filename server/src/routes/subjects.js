@@ -29,7 +29,7 @@ router.get('/', authenticate, async (req, res) => {
         [classId]
       );
     } else if (req.user.role === 'faculty') {
-      // Faculty see their own offerings
+      // Faculty see their own offerings AND their base subjects that lack offerings
       result = await pool.query(
         `SELECT s.*, so.id AS offering_id, 
                 br.name AS branch_name, d.name AS division_name, ba.start_year AS batch_year, s2.number AS semester_number,
@@ -43,7 +43,18 @@ router.get('/', authenticate, async (req, res) => {
          JOIN batches ba ON ac.batch_id = ba.id
          JOIN semesters s2 ON ac.semester_id = s2.id
          WHERE so.faculty_id = $1
-         ORDER BY s.name`,
+         
+         UNION
+         
+         SELECT s.*, null AS offering_id,
+                null AS branch_name, null AS division_name, null AS batch_year, null AS semester_number,
+                (SELECT full_name FROM users WHERE id = s.faculty_id) AS faculty_name,
+                (SELECT COUNT(*) FROM resources WHERE subject_id = s.id AND subject_offering_id IS NULL) AS resource_count
+         FROM subjects s
+         WHERE s.faculty_id = $1 AND NOT EXISTS (
+            SELECT 1 FROM subject_offerings WHERE subject_id = s.id AND faculty_id = $1
+         )
+         ORDER BY name`,
         [req.user.id]
       );
     } else {
