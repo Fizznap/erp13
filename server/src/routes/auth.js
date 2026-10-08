@@ -41,8 +41,8 @@ router.post('/register', authLimiter, async (req, res) => {
     if (!email || !password || !fullName || !role) {
       return res.status(400).json({ error: 'All fields are required' });
     }
-    if (!['student', 'faculty'].includes(role)) {
-      return res.status(400).json({ error: 'Role must be student or faculty' });
+    if (!['student', 'faculty', 'admin'].includes(role)) {
+      return res.status(400).json({ error: 'Role must be student, faculty, or admin' });
     }
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
