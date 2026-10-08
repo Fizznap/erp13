@@ -108,6 +108,9 @@ CREATE TABLE IF NOT EXISTS resources (
     page_count      INTEGER,
     chunk_count     INTEGER DEFAULT 0,
     error_message   TEXT,
+    kind            VARCHAR(50) DEFAULT 'Notes',
+    progress        INTEGER DEFAULT 0,
+    stage           VARCHAR(50) DEFAULT 'QUEUED',
     created_at      TIMESTAMPTZ DEFAULT now(),
     processed_at    TIMESTAMPTZ
 );

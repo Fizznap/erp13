@@ -27,7 +27,7 @@ function initQueue() {
       const { processResource } = require('../services/processor');
       const { resourceId } = job.data;
       console.log(`[Queue] Processing resource ${resourceId}...`);
-      return processResource(resourceId);
+      return processResource(resourceId, job);
     });
 
     processingQueue.on('completed', (job, result) => {

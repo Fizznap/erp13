@@ -36,7 +36,7 @@ const upload = multer({
 // POST /api/resources/upload — upload a PDF
 router.post('/upload', authenticate, authorize('faculty'), upload.single('file'), async (req, res) => {
   try {
-    const { subjectOfferingId, subjectId } = req.body;
+    const { subjectOfferingId, subjectId, kind } = req.body;
     
     // Support either subjectOfferingId (new) or subjectId (legacy)
     if (!subjectOfferingId && !subjectId) {
@@ -71,8 +71,8 @@ router.post('/upload', authenticate, authorize('faculty'), upload.single('file')
     }
 
     const result = await pool.query(
-      `INSERT INTO resources (subject_id, subject_offering_id, uploaded_by, filename, original_name, file_path, file_size, mime_type, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued') RETURNING *`,
+      `INSERT INTO resources (subject_id, subject_offering_id, uploaded_by, filename, original_name, file_path, file_size, mime_type, status, kind, progress, stage)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, 0, 'UPLOAD COMPLETE') RETURNING *`,
       [
         actualSubjectId,
         offeringId,
@@ -82,6 +82,7 @@ router.post('/upload', authenticate, authorize('faculty'), upload.single('file')
         req.file.path,
         req.file.size,
         req.file.mimetype,
+        kind || 'Notes'
       ]
     );
 
@@ -144,6 +145,36 @@ router.get('/', authenticate, async (req, res) => {
   } catch (err) {
     console.error('List resources error:', err);
     res.status(500).json({ error: 'Failed to list resources' });
+  }
+});
+
+// GET /api/resources/:id/status — get processing status
+router.get('/:id/status', authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, status, progress, stage, error_message
+       FROM resources
+       WHERE id = $1`,
+      [req.params.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Resource not found' });
+    }
+
+    const row = result.rows[0];
+    res.json({
+      resourceId: row.id,
+      status: (row.status || 'queued').toUpperCase(),
+      stage: row.stage || 'QUEUED',
+      progress: row.progress || 0,
+      message: row.error_message || row.stage || 'Processing',
+      ready: row.status === 'ready',
+      error: row.status === 'failed' ? row.error_message || 'Processing failed' : null
+    });
+  } catch (err) {
+    console.error('Status check error:', err);
+    res.status(500).json({ error: 'Failed to retrieve status' });
   }
 });
 

@@ -9,9 +9,12 @@ async function initDatabase() {
     await pool.query(schema);
     console.log('Database schema created successfully.');
 
-    // Add subject_offering_id to resources if it does not exist (from Lovable UI updates)
+    // Add subject_offering_id and new tracking columns to resources
     await pool.query(`
       ALTER TABLE resources ADD COLUMN IF NOT EXISTS subject_offering_id UUID REFERENCES subject_offerings(id) ON DELETE CASCADE;
+      ALTER TABLE resources ADD COLUMN IF NOT EXISTS kind VARCHAR(50) DEFAULT 'Notes';
+      ALTER TABLE resources ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0;
+      ALTER TABLE resources ADD COLUMN IF NOT EXISTS stage VARCHAR(50) DEFAULT 'QUEUED';
     `);
 
     // Create IVFFlat index for vector search (requires existing data for training)

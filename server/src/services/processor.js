@@ -94,15 +94,24 @@ function chunkText(text, chunkSizeTokens = 512, overlapTokens = 50) {
  * 4. Generate metadata (summary, topics, bullets)
  * 5. Update resource status
  */
-async function processResource(resourceId) {
+async function processResource(resourceId, job = null) {
   console.log(`[Processor] Starting processing for resource ${resourceId}`);
+
+  const updateProgress = async (stage, progressNum) => {
+    if (job) job.progress(progressNum);
+    await pool.query(
+      "UPDATE resources SET progress = $1, stage = $2 WHERE id = $3",
+      [progressNum, stage, resourceId]
+    );
+  };
 
   try {
     // Update status to processing
     await pool.query(
-      "UPDATE resources SET status = 'processing' WHERE id = $1",
+      "UPDATE resources SET status = 'processing', stage = 'EXTRACTING', progress = 10 WHERE id = $1",
       [resourceId]
     );
+    if (job) job.progress(10);
 
     // Get resource info
     const resourceResult = await pool.query('SELECT * FROM resources WHERE id = $1', [resourceId]);
@@ -123,6 +132,7 @@ async function processResource(resourceId) {
     }
 
     // Step 2: Chunk the text
+    await updateProgress('CHUNKING', 25);
     console.log(`[Processor] Chunking text (${rawText.length} chars)...`);
     const chunkSizeTokens = parseInt(process.env.CHUNK_SIZE_TOKENS) || 512;
     const overlapTokens = parseInt(process.env.CHUNK_OVERLAP_TOKENS) || 50;
@@ -134,6 +144,7 @@ async function processResource(resourceId) {
     }
 
     // Step 3: Embed chunks in batches of 100
+    await updateProgress('EMBEDDING', 40);
     console.log(`[Processor] Embedding ${textChunks.length} chunks...`);
     const allEmbeddings = [];
     const batchSize = 100;
@@ -142,10 +153,17 @@ async function processResource(resourceId) {
       const batch = textChunks.slice(i, i + batchSize).map(c => c.content);
       const embeddings = await embedBatch(batch);
       allEmbeddings.push(...embeddings);
-      console.log(`[Processor] Embedded batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(textChunks.length / batchSize)}`);
+      
+      const currentBatch = Math.floor(i / batchSize) + 1;
+      const totalBatches = Math.ceil(textChunks.length / batchSize);
+      console.log(`[Processor] Embedded batch ${currentBatch}/${totalBatches}`);
+      
+      const currentProgress = 40 + Math.round((currentBatch / totalBatches) * 50);
+      await updateProgress('EMBEDDING', currentProgress);
     }
 
     // Step 4: Store chunks + embeddings
+    await updateProgress('FINALIZING', 90);
     console.log(`[Processor] Storing chunks in database...`);
     // Delete any existing chunks for this resource (in case of reprocessing)
     await pool.query('DELETE FROM resource_chunks WHERE resource_id = $1', [resourceId]);
@@ -186,6 +204,7 @@ async function processResource(resourceId) {
     }
 
     // Step 6: Update resource as ready
+    await updateProgress('READY', 100);
     await pool.query(
       `UPDATE resources SET
         status = 'ready',
@@ -211,7 +230,7 @@ async function processResource(resourceId) {
   } catch (err) {
     console.error(`[Processor] Failed to process resource ${resourceId}:`, err);
     await pool.query(
-      "UPDATE resources SET status = 'failed', error_message = $1 WHERE id = $2",
+      "UPDATE resources SET status = 'failed', stage = 'FAILED', error_message = $1 WHERE id = $2",
       [err.message, resourceId]
     );
     throw err;
