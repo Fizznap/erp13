@@ -100,7 +100,7 @@ router.post('/classes', authenticate, authorize('admin'), async (req, res) => {
     );
     res.status(201).json({ academicClass: result.rows[0] });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to create academic class (may already exist)' });
+    res.status(500).json({ error: 'Failed to create academic class: ' + err.message });
   }
 });
 
