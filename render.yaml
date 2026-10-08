@@ -7,12 +7,11 @@ databases:
     user: snippet
     postgresMajorVersion: "16"
 
+services:
   - type: redis
     name: snippet-redis
     plan: free
     ipAllowList: []
-
-services:
   # ── Express API Server ──────────────────────────
   - type: web
     name: snippet-api
