@@ -119,9 +119,22 @@ function Resources() {
                   <p className="truncate text-xs text-muted-foreground">{[r.kind, mb(r.file_size), new Date(r.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })].filter(Boolean).join(" • ")}</p>
                 </div>
               </div>
+              
+              {(r.status === 'processing' || r.status === 'queued') && (
+                <div className="mt-3 rounded-xl bg-accent p-2.5 text-xs font-medium text-muted-foreground flex items-center justify-center gap-2">
+                  <div className="h-2 w-2 rounded-full bg-ai animate-pulse" />
+                  Preparing this resource for Ask Snippet...
+                </div>
+              )}
+              
+              {r.status === 'failed' && (
+                <div className="mt-3 rounded-xl bg-destructive/10 p-2.5 text-xs font-medium text-destructive flex items-center justify-center gap-2">
+                  Processing failed
+                </div>
+              )}
+
               <div className="mt-3 flex gap-2">
                 <button onClick={() => open(r.id)} className="press flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-foreground py-2.5 text-sm font-semibold text-background"><Download className="h-4 w-4" /> Open</button>
-                {/* Note: In our system uploaded_by is ID, we don't return it in list sometimes. Assuming we can delete if faculty */}
                 {me?.isFaculty && <DeleteBtn id={r.id} />}
               </div>
             </article>
@@ -148,20 +161,49 @@ function DeleteBtn({ id }: { id: string }) {
   );
 }
 
+import { useEffect } from "react";
+
 function UploadCard({ userId, subjects }: { userId: string, subjects: any[] }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [offeringId, setOfferingId] = useState("");
-  const [kind, setKind] = useState<(typeof KINDS)[number]>("Notes"); // Not stored in backend currently, but we can pass it if schema supports
+  const [kind, setKind] = useState<(typeof KINDS)[number]>("Notes");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; t: string } | null>(null);
+  const [processingId, setProcessingId] = useState<string | null>(null);
+
+  const statusQ = useQuery({
+    queryKey: ["resource-status", processingId],
+    queryFn: async () => {
+      if (!processingId) return null;
+      return api<{ status: string, stage: string, progress: number, message: string, ready: boolean, error: string | null }>(`/resources/${processingId}/status`);
+    },
+    enabled: !!processingId,
+    refetchInterval: (q) => (q?.state?.data?.ready || q?.state?.data?.error) ? false : 2000,
+  });
+
+  useEffect(() => {
+    const data = statusQ.data;
+    if (data?.ready) {
+      setMsg({ ok: true, t: "Ready!" });
+      setFile(null);
+      if (fileRef.current) fileRef.current.value = "";
+      qc.invalidateQueries({ queryKey: ["resources"] });
+      // Clear processing state after a few seconds
+      setTimeout(() => setProcessingId(null), 3000);
+    } else if (data?.error) {
+      setMsg({ ok: false, t: data.error || "Failed" });
+      setBusy(false);
+    }
+  }, [statusQ.data?.ready, statusQ.data?.error, qc]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file || !offeringId) return;
     if (file.size > 20 * 1024 * 1024) return setMsg({ ok: false, t: "File must be under 20 MB." });
     setBusy(true); setMsg(null);
+    setProcessingId(null);
     
     try {
       const fd = new FormData();
@@ -169,36 +211,58 @@ function UploadCard({ userId, subjects }: { userId: string, subjects: any[] }) {
       fd.append("subjectOfferingId", offeringId);
       fd.append("kind", kind);
 
-      await api('/resources/upload', {
+      const res = await api<{ resource: { id: string } }>('/resources/upload', {
         method: 'POST',
         body: fd
       });
 
-      setMsg({ ok: true, t: "Uploaded!" }); 
-      setFile(null);
-      if (fileRef.current) fileRef.current.value = "";
-      qc.invalidateQueries({ queryKey: ["resources"] });
+      setProcessingId(res.resource.id);
+      setMsg({ ok: true, t: "Uploaded! Processing..." }); 
     } catch (err: any) {
       setMsg({ ok: false, t: err.message || "Failed to upload" });
-    } finally {
       setBusy(false);
     }
   };
 
-  const input = "w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-hidden focus:border-primary";
+  const isProcessing = !!processingId && !statusQ.data?.ready && !statusQ.data?.error;
+  const progress = statusQ.data?.progress || (busy ? 5 : 0);
+  const statusMessage = statusQ.data?.message || (busy ? "Uploading file..." : "");
+  
+  const input = "w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-hidden focus:border-primary disabled:opacity-50";
   return (
     <form onSubmit={submit} className="surface mt-5 space-y-3 rounded-[24px] p-4">
       <p className="flex items-center gap-2 font-semibold"><Upload className="h-4 w-4" /> Upload a resource</p>
-      <select required value={offeringId} onChange={(e) => setOfferingId(e.target.value)} className={input}>
-        <option value="">Choose subject</option>
-        {subjects.map((s) => <option key={s.offering_id || s.id} value={s.offering_id || s.id}>{s.code} · {s.name}</option>)}
-      </select>
-      <div className="flex gap-2 overflow-x-auto [scrollbar-width:none]">
-        {KINDS.map((k) => <button type="button" key={k} onClick={() => setKind(k)} className={`press shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium ${kind === k ? "bg-foreground text-background" : "border border-border bg-card"}`}>{k}</button>)}
-      </div>
-      <input ref={fileRef} required accept="application/pdf" type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-sm file:mr-3 file:rounded-full file:border-0 file:bg-accent file:px-4 file:py-2 file:text-sm file:font-medium" />
-      {msg && <p className={`text-xs ${msg.ok ? "text-primary-deep" : "text-destructive"}`}>{msg.t}</p>}
-      <button disabled={busy || !file || !offeringId} className="press w-full rounded-2xl bg-ai py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40">{busy ? "Uploading…" : "Upload"}</button>
+      
+      {isProcessing ? (
+        <div className="rounded-2xl border border-border bg-card p-4 space-y-2">
+          <div className="flex justify-between text-sm font-medium">
+            <span>{statusMessage}</span>
+            <span>{progress}%</span>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-accent">
+            <div className="h-full bg-ai transition-all duration-500 ease-out" style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+      ) : (
+        <>
+          <select required value={offeringId} onChange={(e) => setOfferingId(e.target.value)} disabled={busy} className={input}>
+            <option value="">Choose subject</option>
+            {subjects.map((s) => <option key={s.offering_id || s.id} value={s.offering_id || s.id}>{s.code} · {s.name}</option>)}
+          </select>
+          <div className="flex gap-2 overflow-x-auto [scrollbar-width:none]">
+            {KINDS.map((k) => <button type="button" disabled={busy} key={k} onClick={() => setKind(k)} className={`press shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium disabled:opacity-50 ${kind === k ? "bg-foreground text-background" : "border border-border bg-card"}`}>{k}</button>)}
+          </div>
+          <input ref={fileRef} disabled={busy} required accept="application/pdf" type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-sm file:mr-3 file:rounded-full file:border-0 file:bg-accent file:px-4 file:py-2 file:text-sm file:font-medium disabled:opacity-50" />
+        </>
+      )}
+
+      {msg && <p className={`text-xs font-medium ${msg.ok ? "text-primary-deep" : "text-destructive"}`}>{msg.t}</p>}
+      
+      {!isProcessing && (
+        <button disabled={busy || !file || !offeringId} className="press w-full rounded-2xl bg-ai py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40">
+          {busy ? "Uploading…" : "Upload"}
+        </button>
+      )}
     </form>
   );
 }
