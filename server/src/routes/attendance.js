@@ -112,8 +112,8 @@ router.post('/mark', authenticate, authorize('student'), async (req, res) => {
     const deviceId = req.headers['x-device-id'] || 'unknown-device';
     const locHash = crypto.createHash('sha256').update(`${latitude},${longitude}`).digest('hex');
 
-    if (!(sessionId || subjectOfferingId || subjectId) || !nonce || latitude == null || longitude == null) {
-      return res.status(400).json({ error: 'sessionId (or offering/subject), nonce, latitude, and longitude are required' });
+    if (!(sessionId || subjectOfferingId || subjectId || nonce) || latitude == null || longitude == null) {
+      return res.status(400).json({ error: 'sessionId (or offering/subject/nonce), latitude, and longitude are required' });
     }
 
     // Get session
@@ -128,15 +128,20 @@ router.post('/mark', authenticate, authorize('student'), async (req, res) => {
         'SELECT * FROM attendance_sessions WHERE subject_offering_id = $1 AND is_active = true ORDER BY started_at DESC LIMIT 1',
         [subjectOfferingId]
       );
-    } else {
+    } else if (subjectId) {
       sessionResult = await pool.query(
         'SELECT * FROM attendance_sessions WHERE subject_id = $1 AND is_active = true ORDER BY started_at DESC LIMIT 1',
         [subjectId]
       );
+    } else if (nonce) {
+      sessionResult = await pool.query(
+        'SELECT * FROM attendance_sessions WHERE active_nonce = $1 AND is_active = true',
+        [nonce.toUpperCase()]
+      );
     }
     
-    if (sessionResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Active session not found' });
+    if (!sessionResult || sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Active session not found or invalid code' });
     }
 
     const session = sessionResult.rows[0];

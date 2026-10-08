@@ -84,18 +84,14 @@ function Attendance() {
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(async (pos) => {
         try {
-          const res = await api<{ status: string }>('/attendance/mark', {
-            method: 'POST',
-            body: { 
-              subjectId: 1, // We actually don't know subjectId from just the code in the new API without passing sessionId or querying it.
-              // Wait, the API needs sessionId or subjectId, plus nonce. 
-              // We'll assume 'code' is the nonce, but we need subjectId.
-              // We should probably prompt the user to select the subject first, or we need a new endpoint `/api/attendance/mark-by-code`.
-              nonce: code, 
-              latitude: pos.coords.latitude, 
-              longitude: pos.coords.longitude 
-            }
-          });
+            const res = await api<{ status: string }>('/attendance/mark', {
+              method: 'POST',
+              body: { 
+                nonce: code, 
+                latitude: pos.coords.latitude, 
+                longitude: pos.coords.longitude 
+              }
+            });
           setDone("Marked present");
           setCode("");
           qc.invalidateQueries({ queryKey: ["my-history"] });

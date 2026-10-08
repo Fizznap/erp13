@@ -64,7 +64,7 @@ function FacultyConsole() {
             const { session } = await api<{ session: any }>('/attendance/start', {
               method: 'POST',
               body: {
-                subjectId: subjectId,
+                subjectOfferingId: subjectId,
                 latitude: pos.coords.latitude,
                 longitude: pos.coords.longitude,
                 radiusMeters: 50
@@ -142,10 +142,14 @@ function FacultyConsole() {
         <section className="surface rise mt-6 rounded-[26px] p-5">
           <h1 className="text-xl font-semibold">Open a session</h1>
           <p className="mt-1 text-sm text-muted-foreground">Students enter the code on their Attendance tab before it expires.</p>
-          <label className="mt-4 block text-sm font-medium">Subject</label>
+          <label className="mt-4 block text-sm font-medium">Subject Class</label>
           <select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} className="mt-2 w-full rounded-2xl border border-border bg-card px-4 py-3.5 text-sm outline-hidden">
-            <option value="">{subjects.data?.length ? "Choose a subject" : "No subjects assigned"}</option>
-            {subjects.data?.map((s) => <option key={s.id} value={s.id}>{s.code} · {s.name}</option>)}
+            <option value="">{subjects.data?.length ? "Choose a class" : "No classes assigned"}</option>
+            {subjects.data?.map((s) => (
+              <option key={s.offering_id} value={s.offering_id}>
+                {s.code} · {s.branch_name} - Div {s.division_name}
+              </option>
+            ))}
           </select>
           <button disabled={!subjectId} onClick={runStart} className="press mt-5 w-full rounded-2xl bg-ai py-3.5 text-sm font-semibold text-primary-foreground shadow-float disabled:opacity-40">Open session & show code</button>
         </section>

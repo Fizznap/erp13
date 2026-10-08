@@ -12,7 +12,11 @@ export function FacultyHome({ name }: { name: string }) {
   });
   const sections = useQuery({
     queryKey: ["my-sections-home"],
-    queryFn: async (): Promise<any[]> => [],
+    queryFn: async () => {
+      const { api } = await import("@/lib/api");
+      const res = await api<{ subjects: any[] }>("/subjects");
+      return res.subjects;
+    },
   });
   const count = pending.data?.length ?? 0;
 
@@ -43,8 +47,8 @@ export function FacultyHome({ name }: { name: string }) {
       {sections.data?.length === 0 && <p className="surface rounded-[22px] p-4 text-sm text-muted-foreground">No classes yet. Tap “My classes” to add your first branch and division.</p>}
       <div className="flex flex-wrap gap-2">
         {sections.data?.map((s) => (
-          <span key={s.id} className="surface rounded-full px-3 py-1.5 text-xs font-medium">
-            {s.subjects?.code} · {[s.branch, s.division && `Div ${s.division}`].filter(Boolean).join(" ") || s.name}
+          <span key={s.offering_id} className="surface rounded-full px-3 py-1.5 text-xs font-medium">
+            {s.code} · {s.branch_name} - Div {s.division_name}
           </span>
         ))}
       </div>
