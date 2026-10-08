@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+const API_BASE = (import.meta.env['VITE_API_URL'] as string) || 'http://localhost:3001/api';
 
 type RequestOptions = {
   method?: string;
@@ -95,7 +95,7 @@ export async function api<T = unknown>(endpoint: string, options: RequestOptions
     } else {
       clearTokens();
       if (typeof window !== 'undefined') {
-        window.location.href = '/login';
+        window.location.href = '/auth'; // Vite router usually has /auth for login
       }
       throw new Error('Session expired');
     }
