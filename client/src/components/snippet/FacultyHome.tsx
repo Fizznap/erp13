@@ -1,19 +1,18 @@
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Radio, UserCheck, Upload, Users, ArrowRight } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { SectionTitle } from "./AppShell";
 
 // Simple, big-button home for faculty: each card is one job.
 export function FacultyHome({ name }: { name: string }) {
   const pending = useQuery({
     queryKey: ["manual-requests"],
-    queryFn: async () => { const { data } = await supabase.rpc("my_manual_requests"); return data ?? []; },
+    queryFn: async (): Promise<any[]> => [],
     refetchInterval: 15000,
   });
   const sections = useQuery({
     queryKey: ["my-sections-home"],
-    queryFn: async () => { const { data } = await supabase.from("class_sections").select("id, name, branch, division, subjects(code)").order("created_at"); return data ?? []; },
+    queryFn: async (): Promise<any[]> => [],
   });
   const count = pending.data?.length ?? 0;
 

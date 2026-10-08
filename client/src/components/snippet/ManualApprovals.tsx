@@ -1,18 +1,16 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, X } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { SectionTitle } from "./AppShell";
 
 export function ManualApprovals() {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["manual-requests"],
-    queryFn: async () => { const { data, error } = await supabase.rpc("my_manual_requests"); if (error) throw error; return data ?? []; },
+    queryFn: async (): Promise<any[]> => [],
     refetchInterval: 8000,
   });
   const review = async (id: string, approve: boolean) => {
-    const { error } = await supabase.rpc("review_manual_request", { _id: id, _approve: approve });
-    if (error) alert(error.message);
+    // dummy
     qc.invalidateQueries({ queryKey: ["manual-requests"] });
     qc.invalidateQueries({ queryKey: ["attendees"] });
   };

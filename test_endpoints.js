@@ -23,8 +23,8 @@ async function test() {
     });
     data = await res.json();
   }
-  studentToken = data.accessToken;
-  console.log('Student Token acquired.');
+  studentToken = data.accessToken || data.token;
+  console.log('Student Token acquired:', studentToken ? 'yes' : 'no', data);
 
   // Register Faculty
   console.log('Testing: Register Faculty');
@@ -68,7 +68,10 @@ async function test() {
   console.log('Testing: GET /me');
   res = await fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${studentToken}` } });
   data = await res.json();
-  if (!data.user) throw new Error('GET /me failed');
+  if (!data.user) {
+    console.error(data);
+    throw new Error('GET /me failed');
+  }
   console.log('GET /me passed.');
 
   // 3. Subjects / Class visibility
