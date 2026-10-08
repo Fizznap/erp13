@@ -32,6 +32,24 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+app.get('/api/health/db', async (req, res) => {
+  try {
+    const { pool } = require('./db/pool');
+    const tables = await pool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'");
+    const cols1 = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'users'");
+    const cols2 = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'resources'");
+    const cols3 = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'attendance_sessions'");
+    res.json({
+      tables: tables.rows.map(r => r.table_name),
+      users_cols: cols1.rows.map(r => r.column_name),
+      resources_cols: cols2.rows.map(r => r.column_name),
+      attendance_sessions_cols: cols3.rows.map(r => r.column_name),
+    });
+  } catch(e) {
+    res.status(500).json({error: e.message});
+  }
+});
+
 app.use('/api', apiLimiter);
 
 // Serve uploaded files (for admin/debug only)

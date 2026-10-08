@@ -33,27 +33,27 @@ function Resources() {
   const { me } = useMe();
   const [f, setF] = useState("All");
   const [q, setQ] = useState("");
-  const [subjectId, setSubjectId] = useState<string>("");
+  const [offeringId, setOfferingId] = useState<string>("");
 
   const subjectsQuery = useQuery({
     queryKey: ["subjects"],
     queryFn: async () => {
       const { subjects } = await api<{ subjects: any[] }>("/subjects");
-      if (subjects.length > 0 && !subjectId) {
-        setSubjectId(String(subjects[0].id));
+      if (subjects.length > 0 && !offeringId) {
+        setOfferingId(String(subjects[0].offering_id || subjects[0].id));
       }
       return subjects;
     },
   });
 
   const list = useQuery({
-    queryKey: ["resources", subjectId],
+    queryKey: ["resources", offeringId],
     queryFn: async () => {
-      if (!subjectId) return [];
-      const { resources } = await api<{ resources: any[] }>(`/resources?subjectId=${subjectId}`);
+      if (!offeringId) return [];
+      const { resources } = await api<{ resources: any[] }>(`/resources?subjectOfferingId=${offeringId}`);
       return resources;
     },
-    enabled: !!subjectId,
+    enabled: !!offeringId,
   });
 
   const items = (list.data ?? []).filter((i) => (f === "All" || i.kind === f) && `${i.filename} ${i.original_name}`.toLowerCase().includes(q.toLowerCase()));
@@ -88,10 +88,10 @@ function Resources() {
       <h1 className="rise text-[28px] font-semibold tracking-tight">Resources</h1>
       
       {subjectsQuery.data && subjectsQuery.data.length > 0 ? (
-        <select value={subjectId} onChange={e => setSubjectId(e.target.value)} className="w-full mt-4 rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-hidden focus:border-primary">
+        <select value={offeringId} onChange={e => setOfferingId(e.target.value)} className="w-full mt-4 rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-hidden focus:border-primary">
           <option value="" disabled>Select Subject</option>
           {subjectsQuery.data.map((s) => (
-            <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+            <option key={s.offering_id || s.id} value={s.offering_id || s.id}>{s.name} ({s.code})</option>
           ))}
         </select>
       ) : null}
@@ -151,7 +151,7 @@ function DeleteBtn({ id }: { id: string }) {
 function UploadCard({ userId, subjects }: { userId: string, subjects: any[] }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [subjectId, setSubjectId] = useState("");
+  const [offeringId, setOfferingId] = useState("");
   const [kind, setKind] = useState<(typeof KINDS)[number]>("Notes"); // Not stored in backend currently, but we can pass it if schema supports
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -159,14 +159,14 @@ function UploadCard({ userId, subjects }: { userId: string, subjects: any[] }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file || !subjectId) return;
+    if (!file || !offeringId) return;
     if (file.size > 20 * 1024 * 1024) return setMsg({ ok: false, t: "File must be under 20 MB." });
     setBusy(true); setMsg(null);
     
     try {
       const fd = new FormData();
       fd.append("file", file);
-      fd.append("subjectId", subjectId);
+      fd.append("subjectOfferingId", offeringId);
       fd.append("kind", kind);
 
       await api('/resources/upload', {
@@ -189,16 +189,16 @@ function UploadCard({ userId, subjects }: { userId: string, subjects: any[] }) {
   return (
     <form onSubmit={submit} className="surface mt-5 space-y-3 rounded-[24px] p-4">
       <p className="flex items-center gap-2 font-semibold"><Upload className="h-4 w-4" /> Upload a resource</p>
-      <select required value={subjectId} onChange={(e) => setSubjectId(e.target.value)} className={input}>
+      <select required value={offeringId} onChange={(e) => setOfferingId(e.target.value)} className={input}>
         <option value="">Choose subject</option>
-        {subjects.map((s) => <option key={s.id} value={s.id}>{s.code} · {s.name}</option>)}
+        {subjects.map((s) => <option key={s.offering_id || s.id} value={s.offering_id || s.id}>{s.code} · {s.name}</option>)}
       </select>
       <div className="flex gap-2 overflow-x-auto [scrollbar-width:none]">
         {KINDS.map((k) => <button type="button" key={k} onClick={() => setKind(k)} className={`press shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium ${kind === k ? "bg-foreground text-background" : "border border-border bg-card"}`}>{k}</button>)}
       </div>
       <input ref={fileRef} required accept="application/pdf" type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-sm file:mr-3 file:rounded-full file:border-0 file:bg-accent file:px-4 file:py-2 file:text-sm file:font-medium" />
       {msg && <p className={`text-xs ${msg.ok ? "text-primary-deep" : "text-destructive"}`}>{msg.t}</p>}
-      <button disabled={busy || !file || !subjectId} className="press w-full rounded-2xl bg-ai py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40">{busy ? "Uploading…" : "Upload"}</button>
+      <button disabled={busy || !file || !offeringId} className="press w-full rounded-2xl bg-ai py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40">{busy ? "Uploading…" : "Upload"}</button>
     </form>
   );
 }

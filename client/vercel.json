@@ -2,5 +2,8 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": ".output/public",
-  "installCommand": "npm install"
+  "installCommand": "npm install",
+  "env": {
+    "VITE_API_URL": "https://snippet-api.onrender.com/api"
+  }
 }

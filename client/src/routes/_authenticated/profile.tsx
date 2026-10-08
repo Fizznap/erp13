@@ -5,6 +5,7 @@ import { useFaceStatus } from "@/lib/face";
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { AppShell, SectionTitle, Spark } from "@/components/snippet/AppShell";
+import { ProfileForm } from "@/components/snippet/ProfileForm";
 import { useMe } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/_authenticated/profile")({
@@ -75,6 +76,11 @@ function Profile() {
       <div className="surface divide-y divide-border rounded-[24px]">
         <div className="flex items-center gap-3 p-4 text-sm"><Mail className="h-4 w-4 shrink-0 text-muted-foreground" /><span className="truncate">{me?.user.email}</span></div>
         <div className="flex items-center gap-3 p-4 text-sm"><GraduationCap className="h-4 w-4 shrink-0 text-muted-foreground" /><span className="truncate">{roleName} Role</span></div>
+      </div>
+
+      <SectionTitle>Edit Profile</SectionTitle>
+      <div className="surface mb-8 rounded-[24px] p-5">
+        <ProfileForm user={me?.user} />
       </div>
 
     </AppShell>
