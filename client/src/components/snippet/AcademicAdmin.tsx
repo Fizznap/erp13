@@ -148,6 +148,86 @@ export function AcademicAdmin() {
           <button disabled={loading} type="submit" className="press rounded-xl bg-ai text-primary-foreground py-2 font-medium">Assign Student</button>
         </form>
       </div>
+      <div className="surface mt-4 rounded-[22px] p-5">
+        <h3 className="font-semibold mb-3">Create Subject</h3>
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          setLoading(true); setErr("");
+          try {
+            await api("/subjects", {
+              method: 'POST',
+              body: {
+                name: fd.get("name"),
+                code: fd.get("code"),
+                description: fd.get("description"),
+                credits: parseInt(fd.get("credits") as string)
+              }
+            });
+            qc.invalidateQueries({ queryKey: ["academic-hierarchy"] });
+            alert("Subject created successfully!");
+            e.currentTarget.reset();
+          } catch(err: any) {
+            setErr(err.message);
+          } finally {
+            setLoading(false);
+          }
+        }} className="flex flex-col gap-3 text-sm">
+          <input name="name" required placeholder="Subject Name (e.g. Database Systems)" className="rounded-xl border border-border bg-card p-2 outline-none" />
+          <input name="code" required placeholder="Subject Code (e.g. CS301)" className="rounded-xl border border-border bg-card p-2 outline-none" />
+          <input name="description" placeholder="Description" className="rounded-xl border border-border bg-card p-2 outline-none" />
+          <input name="credits" type="number" required placeholder="Credits (e.g. 3)" className="rounded-xl border border-border bg-card p-2 outline-none" />
+          <button disabled={loading} type="submit" className="press rounded-xl bg-primary text-primary-foreground py-2 font-medium">Create Subject</button>
+        </form>
+      </div>
+
+      <div className="surface mt-4 rounded-[22px] p-5">
+        <h3 className="font-semibold mb-3">Assign Subject to Class (Create Offering)</h3>
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          setLoading(true); setErr("");
+          try {
+            await api("/subjects/offerings", {
+              method: 'POST',
+              body: {
+                subjectId: fd.get("subjectId"),
+                academicClassId: fd.get("academicClassId"),
+                facultyId: fd.get("facultyId")
+              }
+            });
+            alert("Subject assigned to class successfully!");
+            e.currentTarget.reset();
+          } catch(err: any) {
+            setErr(err.message);
+          } finally {
+            setLoading(false);
+          }
+        }} className="flex flex-col gap-3 text-sm">
+          <select name="subjectId" required className="rounded-xl border border-border bg-card p-2 outline-none">
+            <option value="">Select Subject</option>
+            {hierarchy.data?.subjects?.map((s: any) => (
+              <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+            ))}
+          </select>
+          <select name="academicClassId" required className="rounded-xl border border-border bg-card p-2 outline-none">
+            <option value="">Select Class</option>
+            {hierarchy.data?.classes?.map((c: any) => (
+              <option key={c.id} value={c.id}>
+                {c.branch_code} | {c.start_year}-{c.end_year} | Div {c.division_name} | Sem {c.semester_number}
+              </option>
+            ))}
+          </select>
+          <select name="facultyId" required className="rounded-xl border border-border bg-card p-2 outline-none">
+            <option value="">Select Faculty</option>
+            {/* Using a separate query or existing users query. Since users query fetches only students right now, let's just make it fetch faculty or we can let admin type ID. Wait, let's fix the users query to get all or create a faculty query */}
+            {hierarchy.data?.faculty?.map((f: any) => (
+              <option key={f.id} value={f.id}>{f.full_name} ({f.email})</option>
+            ))}
+          </select>
+          <button disabled={loading} type="submit" className="press rounded-xl bg-ai text-primary-foreground py-2 font-medium">Assign Subject to Class</button>
+        </form>
+      </div>
     </>
   );
 }
