@@ -4,6 +4,6 @@
   "outputDirectory": ".output/public",
   "installCommand": "npm install",
   "env": {
-    "VITE_API_URL": "https://snippet-api.onrender.com/api"
+    "VITE_API_URL": "https://snippet-api-pf9m.onrender.com"
   }
 }

@@ -48,7 +48,7 @@ services:
       - key: JWT_REFRESH_EXPIRES_IN
         value: "7d"
       - key: CLIENT_URL
-        value: "https://client-1utrp2032-clyrix4-4679s-projects.vercel.app"
+        value: "https://client-phi-lake.vercel.app"
       - key: UPLOAD_DIR
         value: ./uploads     # Ephemeral storage since disks aren't supported on free tier
       - key: MAX_FILE_SIZE
