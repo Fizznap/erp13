@@ -16,17 +16,13 @@ services:
   - type: web
     name: snippet-api
     runtime: node
-    plan: starter        # Changed to Starter because persistent disks are not allowed on Free tier
+    plan: free           # Reverted to free tier since no credit card is provided
     region: oregon
     rootDir: server
     buildCommand: npm ci --production
     startCommand: node src/index.js
     healthCheckPath: /api/health
     autoDeploy: true
-    disk:
-      name: uploads
-      mountPath: /data/uploads
-      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
@@ -54,7 +50,7 @@ services:
       - key: CLIENT_URL
         value: "https://client-1utrp2032-clyrix4-4679s-projects.vercel.app"
       - key: UPLOAD_DIR
-        value: /data/uploads # Persistent storage
+        value: ./uploads     # Ephemeral storage since disks aren't supported on free tier
       - key: MAX_FILE_SIZE
         value: "20971520"
       - key: SIMILARITY_THRESHOLD
