@@ -105,7 +105,7 @@ router.post('/upload', authenticate, authorize('faculty'), upload.single('file')
     res.status(201).json({ resource });
   } catch (err) {
     console.error('Upload error:', err);
-    res.status(500).json({ error: 'Upload failed' });
+    res.status(500).json({ error: 'Upload failed', details: err.message, stack: err.stack });
   }
 });
 
