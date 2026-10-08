@@ -24,16 +24,28 @@ router.post('/', authenticate, authorize('student', 'faculty'), ragLimiter, asyn
 
     // Verify subject exists and user has access, also fetch subject name
     let subjectName = 'the subject';
+    let userScope = { role: req.user.role };
+
     if (req.user.role === 'student') {
-      const enrollment = await pool.query(
-        'SELECT s.name FROM subject_enrollments e JOIN subjects s ON e.subject_id = s.id WHERE e.student_id = $1 AND e.subject_id = $2',
-        [req.user.id, subjectId]
+      const userRec = await pool.query('SELECT academic_class_id FROM users WHERE id = $1', [req.user.id]);
+      userScope.academicClassId = userRec.rows[0]?.academic_class_id;
+      
+      if (!userScope.academicClassId) {
+        return res.status(403).json({ error: 'You are not assigned to an academic class' });
+      }
+
+      const offering = await pool.query(
+        `SELECT s.name FROM subject_offerings so 
+         JOIN subjects s ON so.subject_id = s.id 
+         WHERE so.academic_class_id = $1 AND so.subject_id = $2`,
+        [userScope.academicClassId, subjectId]
       );
-      if (enrollment.rows.length === 0) {
+      if (offering.rows.length === 0) {
         return res.status(403).json({ error: 'You are not enrolled in this subject' });
       }
-      subjectName = enrollment.rows[0].name;
+      subjectName = offering.rows[0].name;
     } else {
+      userScope.facultyId = req.user.id;
       const subj = await pool.query('SELECT name FROM subjects WHERE id = $1', [subjectId]);
       if (subj.rows.length > 0) subjectName = subj.rows[0].name;
     }
@@ -50,10 +62,10 @@ router.post('/', authenticate, authorize('student', 'faculty'), ragLimiter, asyn
     // Step 1: Embed the query
     const queryEmbedding = await embedQuery(query);
 
-    // Step 2: Vector search
+    // Step 2: Vector search with strict authorization scope
     const threshold = parseFloat(process.env.SIMILARITY_THRESHOLD) || 0.55;
     const topK = parseInt(process.env.TOP_K_CHUNKS) || 5;
-    const chunks = await vectorSearch(queryEmbedding, subjectId, topK);
+    const chunks = await vectorSearch(queryEmbedding, subjectId, userScope, topK);
 
     // Calculate top scores
     const topKScores = chunks.map(c => c.similarity);

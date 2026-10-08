@@ -13,35 +13,56 @@ function generateNonce() {
 // POST /api/attendance/start — faculty starts attendance session
 router.post('/start', authenticate, authorize('faculty'), async (req, res) => {
   try {
-    const { subjectId, latitude, longitude, radiusMeters } = req.body;
+    const { subjectOfferingId, subjectId, latitude, longitude, radiusMeters } = req.body;
 
-    if (!subjectId || latitude == null || longitude == null) {
-      return res.status(400).json({ error: 'subjectId, latitude, and longitude are required' });
+    if ((!subjectOfferingId && !subjectId) || latitude == null || longitude == null) {
+      return res.status(400).json({ error: 'subjectOfferingId, latitude, and longitude are required' });
     }
 
-    // Verify faculty owns this subject
-    const subject = await pool.query(
-      'SELECT id FROM subjects WHERE id = $1 AND faculty_id = $2',
-      [subjectId, req.user.id]
-    );
-    if (subject.rows.length === 0) {
-      return res.status(403).json({ error: 'You do not own this subject' });
+    let actualSubjectId = subjectId;
+    let actualOfferingId = subjectOfferingId || null;
+
+    if (subjectOfferingId) {
+      const offering = await pool.query(
+        'SELECT subject_id FROM subject_offerings WHERE id = $1 AND faculty_id = $2',
+        [subjectOfferingId, req.user.id]
+      );
+      if (offering.rows.length === 0) {
+        return res.status(403).json({ error: 'You do not own this subject offering' });
+      }
+      actualSubjectId = offering.rows[0].subject_id;
+    } else {
+      const subject = await pool.query(
+        'SELECT id FROM subjects WHERE id = $1 AND faculty_id = $2',
+        [subjectId, req.user.id]
+      );
+      if (subject.rows.length === 0) {
+        return res.status(403).json({ error: 'You do not own this subject' });
+      }
     }
 
-    // End any existing active sessions for this subject
-    await pool.query(
-      `UPDATE attendance_sessions SET is_active = false, ended_at = now()
-       WHERE subject_id = $1 AND faculty_id = $2 AND is_active = true`,
-      [subjectId, req.user.id]
-    );
+    // End any existing active sessions
+    if (actualOfferingId) {
+      await pool.query(
+        `UPDATE attendance_sessions SET is_active = false, ended_at = now()
+         WHERE subject_offering_id = $1 AND faculty_id = $2 AND is_active = true`,
+        [actualOfferingId, req.user.id]
+      );
+    } else {
+      await pool.query(
+        `UPDATE attendance_sessions SET is_active = false, ended_at = now()
+         WHERE subject_id = $1 AND faculty_id = $2 AND is_active = true`,
+        [actualSubjectId, req.user.id]
+      );
+    }
 
     const nonce = generateNonce();
     const nonceExpires = new Date(Date.now() + 30 * 1000); // 30 seconds
 
     const result = await pool.query(
-      `INSERT INTO attendance_sessions (subject_id, faculty_id, latitude, longitude, radius_meters, active_nonce, nonce_expires)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [subjectId, req.user.id, latitude, longitude, radiusMeters || 50, nonce, nonceExpires]
+      `INSERT INTO attendance_sessions (subject_id, subject_offering_id, faculty_id, latitude, longitude, radius_meters, active_nonce, nonce_expires)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [actualSubjectId, actualOfferingId, req.user.id, latitude, longitude, radiusMeters || 50, nonce, nonceExpires]
     );
 
     res.status(201).json({ session: result.rows[0] });
@@ -87,12 +108,12 @@ router.get('/:sessionId/nonce', authenticate, authorize('faculty'), async (req, 
 // POST /api/attendance/mark — student marks attendance
 router.post('/mark', authenticate, authorize('student'), async (req, res) => {
   try {
-    const { sessionId, subjectId, nonce, latitude, longitude } = req.body;
+    const { sessionId, subjectOfferingId, subjectId, nonce, latitude, longitude } = req.body;
     const deviceId = req.headers['x-device-id'] || 'unknown-device';
     const locHash = crypto.createHash('sha256').update(`${latitude},${longitude}`).digest('hex');
 
-    if (!(sessionId || subjectId) || !nonce || latitude == null || longitude == null) {
-      return res.status(400).json({ error: 'sessionId (or subjectId), nonce, latitude, and longitude are required' });
+    if (!(sessionId || subjectOfferingId || subjectId) || !nonce || latitude == null || longitude == null) {
+      return res.status(400).json({ error: 'sessionId (or offering/subject), nonce, latitude, and longitude are required' });
     }
 
     // Get session
@@ -101,6 +122,11 @@ router.post('/mark', authenticate, authorize('student'), async (req, res) => {
       sessionResult = await pool.query(
         'SELECT * FROM attendance_sessions WHERE id = $1 AND is_active = true',
         [sessionId]
+      );
+    } else if (subjectOfferingId) {
+      sessionResult = await pool.query(
+        'SELECT * FROM attendance_sessions WHERE subject_offering_id = $1 AND is_active = true ORDER BY started_at DESC LIMIT 1',
+        [subjectOfferingId]
       );
     } else {
       sessionResult = await pool.query(
@@ -116,13 +142,25 @@ router.post('/mark', authenticate, authorize('student'), async (req, res) => {
     const session = sessionResult.rows[0];
     const actualSessionId = session.id;
 
-    // Verify student is enrolled in this subject
-    const enrollment = await pool.query(
-      'SELECT id FROM subject_enrollments WHERE student_id = $1 AND subject_id = $2',
-      [req.user.id, session.subject_id]
-    );
-    if (enrollment.rows.length === 0) {
-      return res.status(403).json({ error: 'You are not enrolled in this subject' });
+    // Verify student is enrolled in this offering
+    const userRec = await pool.query('SELECT academic_class_id FROM users WHERE id = $1', [req.user.id]);
+    const classId = userRec.rows[0]?.academic_class_id;
+    if (!classId) return res.status(403).json({ error: 'You are not assigned to an academic class' });
+
+    if (session.subject_offering_id) {
+      const offering = await pool.query('SELECT id FROM subject_offerings WHERE id = $1 AND academic_class_id = $2', [session.subject_offering_id, classId]);
+      if (offering.rows.length === 0) {
+        return res.status(403).json({ error: 'You are not enrolled in this offering' });
+      }
+    } else {
+      const offering = await pool.query('SELECT id FROM subject_offerings WHERE subject_id = $1 AND academic_class_id = $2', [session.subject_id, classId]);
+      if (offering.rows.length === 0) {
+        // Fallback to old enrollment if offering doesn't exist
+        const oldEnr = await pool.query('SELECT id FROM subject_enrollments WHERE student_id = $1 AND subject_id = $2', [req.user.id, session.subject_id]);
+        if (oldEnr.rows.length === 0) {
+          return res.status(403).json({ error: 'You are not enrolled in this subject' });
+        }
+      }
     }
 
     // Check if already marked
@@ -245,42 +283,59 @@ router.post('/:sessionId/override', authenticate, authorize('admin', 'faculty'),
   }
 });
 
-// GET /api/attendance/sessions?subjectId=X — list sessions for a subject
+// GET /api/attendance/sessions?subjectOfferingId=X — list sessions
 router.get('/sessions', authenticate, authorize('faculty', 'admin'), async (req, res) => {
   try {
-    const { subjectId } = req.query;
-    if (!subjectId) {
-      return res.status(400).json({ error: 'subjectId is required' });
+    const { subjectOfferingId, subjectId } = req.query;
+    if (!subjectOfferingId && !subjectId) {
+      return res.status(400).json({ error: 'subjectOfferingId or subjectId is required' });
     }
 
-    const result = await pool.query(
-      `SELECT a.*,
-              (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'present') AS present_count,
-              (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'rejected') AS rejected_count
-       FROM attendance_sessions a
-       WHERE a.subject_id = $1
-       ORDER BY a.started_at DESC`,
-      [subjectId]
-    );
+    let result;
+    if (subjectOfferingId) {
+      result = await pool.query(
+        `SELECT a.*,
+                (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'present') AS present_count,
+                (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'rejected') AS rejected_count
+         FROM attendance_sessions a
+         WHERE a.subject_offering_id = $1
+         ORDER BY a.started_at DESC`,
+        [subjectOfferingId]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT a.*,
+                (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'present') AS present_count,
+                (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'rejected') AS rejected_count
+         FROM attendance_sessions a
+         WHERE a.subject_id = $1
+         ORDER BY a.started_at DESC`,
+        [subjectId]
+      );
+    }
     res.json({ sessions: result.rows });
   } catch (err) {
     console.error('List sessions error:', err);
     res.status(500).json({ error: 'Failed to list sessions' });
   }
 });
-// GET /api/attendance/my?subjectId=X — student's attendance records
+
+// GET /api/attendance/my/records?subjectOfferingId=X — student's attendance records
 router.get('/my/records', authenticate, authorize('student'), async (req, res) => {
   try {
-    const { subjectId } = req.query;
+    const { subjectOfferingId, subjectId } = req.query;
     let query = `
-      SELECT ar.*, a.subject_id, s.name AS subject_name, a.started_at AS session_date
+      SELECT ar.*, a.subject_id, a.subject_offering_id, s.name AS subject_name, a.started_at AS session_date
       FROM attendance_records ar
       JOIN attendance_sessions a ON a.id = ar.session_id
       JOIN subjects s ON s.id = a.subject_id
       WHERE ar.student_id = $1
     `;
     const params = [req.user.id];
-    if (subjectId) {
+    if (subjectOfferingId) {
+      query += ' AND a.subject_offering_id = $2';
+      params.push(subjectOfferingId);
+    } else if (subjectId) {
       query += ' AND a.subject_id = $2';
       params.push(subjectId);
     }
@@ -293,7 +348,6 @@ router.get('/my/records', authenticate, authorize('student'), async (req, res) =
     res.status(500).json({ error: 'Failed to get records' });
   }
 });
-
 
 // GET /api/attendance/:sessionId/records — list attendance records for a session
 router.get('/:sessionId/records', authenticate, authorize('faculty', 'admin'), async (req, res) => {

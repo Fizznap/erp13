@@ -28,6 +28,7 @@ function sanitizeUser(user) {
     fullName: user.full_name,
     role: user.role,
     isActive: user.is_active,
+    academicClassId: user.academic_class_id,
     createdAt: user.created_at,
   };
 }
@@ -138,6 +139,45 @@ router.get('/me', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Me error:', err);
     res.status(500).json({ error: 'Failed to fetch user' });
+  }
+});
+
+// PATCH /api/auth/me
+router.patch('/me', authenticate, async (req, res) => {
+  try {
+    const { fullName, password } = req.body;
+    let updateFields = [];
+    let params = [];
+    let paramCount = 1;
+
+    if (fullName) {
+      updateFields.push(`full_name = $${paramCount++}`);
+      params.push(fullName);
+    }
+
+    if (password) {
+      if (password.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      }
+      const passwordHash = await bcrypt.hash(password, 12);
+      updateFields.push(`password_hash = $${paramCount++}`);
+      params.push(passwordHash);
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({ error: 'Nothing to update' });
+    }
+
+    params.push(req.user.id);
+    const result = await pool.query(
+      `UPDATE users SET ${updateFields.join(', ')}, updated_at = now() WHERE id = $${paramCount} RETURNING *`,
+      params
+    );
+
+    res.json({ user: sanitizeUser(result.rows[0]) });
+  } catch (err) {
+    console.error('Update me error:', err);
+    res.status(500).json({ error: 'Failed to update user' });
   }
 });
 

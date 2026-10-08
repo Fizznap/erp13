@@ -9,38 +9,55 @@ router.get('/', authenticate, async (req, res) => {
   try {
     let result;
     if (req.user.role === 'student') {
-      // Students see enrolled subjects
+      // Students see subject offerings tied to their academic class
+      const user = await pool.query('SELECT academic_class_id FROM users WHERE id = $1', [req.user.id]);
+      const classId = user.rows[0]?.academic_class_id;
+
+      if (!classId) {
+        return res.json({ subjects: [] });
+      }
+
       result = await pool.query(
-        `SELECT s.*, u.full_name AS faculty_name,
-                (SELECT COUNT(*) FROM resources WHERE subject_id = s.id AND status = 'ready') AS resource_count,
+        `SELECT s.*, so.id AS offering_id, u.full_name AS faculty_name,
+                (SELECT COUNT(*) FROM resources WHERE subject_offering_id = so.id AND status = 'ready') AS resource_count,
                 true AS is_enrolled
-         FROM subjects s
-         JOIN subject_enrollments se ON se.subject_id = s.id
-         JOIN users u ON u.id = s.faculty_id
-         WHERE se.student_id = $1
+         FROM subject_offerings so
+         JOIN subjects s ON so.subject_id = s.id
+         JOIN users u ON u.id = so.faculty_id
+         WHERE so.academic_class_id = $1
          ORDER BY s.name`,
-        [req.user.id]
+        [classId]
       );
     } else if (req.user.role === 'faculty') {
-      // Faculty see their own subjects
+      // Faculty see their own offerings
       result = await pool.query(
-        `SELECT s.*, 
-                (SELECT full_name FROM users WHERE id = s.faculty_id) AS faculty_name,
-                (SELECT COUNT(*) FROM resources WHERE subject_id = s.id) AS resource_count,
-                (SELECT COUNT(*) FROM subject_enrollments WHERE subject_id = s.id) AS student_count
-         FROM subjects s
-         WHERE s.faculty_id = $1
+        `SELECT s.*, so.id AS offering_id, 
+                br.name AS branch_name, d.name AS division_name, ba.start_year AS batch_year, s2.number AS semester_number,
+                (SELECT full_name FROM users WHERE id = so.faculty_id) AS faculty_name,
+                (SELECT COUNT(*) FROM resources WHERE subject_offering_id = so.id) AS resource_count
+         FROM subject_offerings so
+         JOIN subjects s ON so.subject_id = s.id
+         JOIN academic_classes ac ON so.academic_class_id = ac.id
+         JOIN branches br ON ac.branch_id = br.id
+         JOIN divisions d ON ac.division_id = d.id
+         JOIN batches ba ON ac.batch_id = ba.id
+         JOIN semesters s2 ON ac.semester_id = s2.id
+         WHERE so.faculty_id = $1
          ORDER BY s.name`,
         [req.user.id]
       );
     } else {
-      // Admin sees all
+      // Admin sees all offerings + subjects
       result = await pool.query(
-        `SELECT s.*, u.full_name AS faculty_name,
-                (SELECT COUNT(*) FROM resources WHERE subject_id = s.id) AS resource_count,
-                (SELECT COUNT(*) FROM subject_enrollments WHERE subject_id = s.id) AS student_count
-         FROM subjects s
-         JOIN users u ON u.id = s.faculty_id
+        `SELECT s.*, so.id AS offering_id, u.full_name AS faculty_name,
+                br.name AS branch_name, d.name AS division_name,
+                (SELECT COUNT(*) FROM resources WHERE subject_offering_id = so.id) AS resource_count
+         FROM subject_offerings so
+         JOIN subjects s ON so.subject_id = s.id
+         JOIN users u ON u.id = so.faculty_id
+         JOIN academic_classes ac ON so.academic_class_id = ac.id
+         JOIN branches br ON ac.branch_id = br.id
+         JOIN divisions d ON ac.division_id = d.id
          ORDER BY s.name`
       );
     }
@@ -51,7 +68,7 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-// POST /api/subjects — create subject (faculty or admin)
+// POST /api/subjects — create subject (faculty or admin) - creates base subject
 router.post('/', authenticate, authorize('faculty', 'admin'), async (req, res) => {
   try {
     const { name, code, description } = req.body;
@@ -60,9 +77,9 @@ router.post('/', authenticate, authorize('faculty', 'admin'), async (req, res) =
     }
 
     const result = await pool.query(
-      `INSERT INTO subjects (name, code, description, faculty_id)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [name, code, description || null, req.user.id]
+      `INSERT INTO subjects (name, code, description)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [name, code, description || null]
     );
 
     res.status(201).json({ subject: result.rows[0] });
@@ -75,73 +92,45 @@ router.post('/', authenticate, authorize('faculty', 'admin'), async (req, res) =
   }
 });
 
+// POST /api/subjects/offerings — bind subject to a class and faculty
+router.post('/offerings', authenticate, authorize('admin', 'faculty'), async (req, res) => {
+  try {
+    const { subjectId, academicClassId, facultyId } = req.body;
+    if (!subjectId || !academicClassId || !facultyId) {
+      return res.status(400).json({ error: 'subjectId, academicClassId, and facultyId are required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO subject_offerings (subject_id, academic_class_id, faculty_id)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [subjectId, academicClassId, facultyId]
+    );
+
+    res.status(201).json({ offering: result.rows[0] });
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Subject offering already exists for this class' });
+    }
+    console.error('Create offering error:', err);
+    res.status(500).json({ error: 'Failed to create subject offering' });
+  }
+});
+
 // GET /api/subjects/:id
 router.get('/:id', authenticate, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT s.*, u.full_name AS faculty_name,
-              (SELECT COUNT(*) FROM resources WHERE subject_id = s.id AND status = 'ready') AS resource_count,
-              (SELECT COUNT(*) FROM subject_enrollments WHERE subject_id = s.id) AS student_count
-       FROM subjects s
-       JOIN users u ON u.id = s.faculty_id
-       WHERE s.id = $1`,
+      `SELECT s.* FROM subjects s WHERE s.id = $1`,
       [req.params.id]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Subject not found' });
     }
-
-    // Check enrollment for students
-    if (req.user.role === 'student') {
-      const enrollment = await pool.query(
-        'SELECT id FROM subject_enrollments WHERE student_id = $1 AND subject_id = $2',
-        [req.user.id, req.params.id]
-      );
-      result.rows[0].is_enrolled = enrollment.rows.length > 0;
-    }
-
     res.json({ subject: result.rows[0] });
   } catch (err) {
     console.error('Get subject error:', err);
     res.status(500).json({ error: 'Failed to get subject' });
-  }
-});
-
-// POST /api/subjects/:id/enroll — student enrolls in subject
-router.post('/:id/enroll', authenticate, authorize('student'), async (req, res) => {
-  try {
-    await pool.query(
-      `INSERT INTO subject_enrollments (student_id, subject_id)
-       VALUES ($1, $2)
-       ON CONFLICT DO NOTHING`,
-      [req.user.id, req.params.id]
-    );
-    res.json({ message: 'Enrolled successfully' });
-  } catch (err) {
-    console.error('Enroll error:', err);
-    res.status(500).json({ error: 'Failed to enroll' });
-  }
-});
-
-// GET /api/subjects/available/all — list all subjects for enrollment
-router.get('/available/all', authenticate, authorize('student'), async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT s.*, u.full_name AS faculty_name,
-              EXISTS(
-                SELECT 1 FROM subject_enrollments 
-                WHERE student_id = $1 AND subject_id = s.id
-              ) AS is_enrolled
-       FROM subjects s
-       JOIN users u ON u.id = s.faculty_id
-       ORDER BY s.name`,
-      [req.user.id]
-    );
-    res.json({ subjects: result.rows });
-  } catch (err) {
-    console.error('Available subjects error:', err);
-    res.status(500).json({ error: 'Failed to list subjects' });
   }
 });
 

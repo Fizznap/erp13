@@ -70,10 +70,21 @@ async function embedQuery(query) {
 
 /**
  * Perform vector similarity search against resource_chunks within a subject.
- * Returns top-K chunks with similarity scores.
+ * STRICT RAG: Authorized by academic class (student) or assignment (faculty).
  */
-async function vectorSearch(queryEmbedding, subjectId, topK = 5) {
+async function vectorSearch(queryEmbedding, subjectId, userScope, topK = 5) {
   const vectorStr = `[${queryEmbedding.join(',')}]`;
+
+  let authFilter = '';
+  let params = [vectorStr, subjectId, topK];
+
+  if (userScope.role === 'student') {
+    authFilter = `AND r.subject_offering_id IN (SELECT id FROM subject_offerings WHERE academic_class_id = $4)`;
+    params.push(userScope.academicClassId);
+  } else if (userScope.role === 'faculty') {
+    authFilter = `AND r.subject_offering_id IN (SELECT id FROM subject_offerings WHERE faculty_id = $4)`;
+    params.push(userScope.facultyId);
+  }
 
   const result = await pool.query(
     `SELECT rc.*, r.original_name, r.subject_id,
@@ -81,9 +92,10 @@ async function vectorSearch(queryEmbedding, subjectId, topK = 5) {
      FROM resource_chunks rc
      JOIN resources r ON r.id = rc.resource_id
      WHERE r.subject_id = $2 AND r.status = 'ready'
+     ${authFilter}
      ORDER BY rc.embedding <=> $1::vector
      LIMIT $3`,
-    [vectorStr, subjectId, topK]
+    params
   );
 
   return result.rows;

@@ -39,6 +39,7 @@ app.use('/uploads', express.static(path.join(__dirname, '..', process.env.UPLOAD
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
+app.use('/api/academic', require('./routes/academic'));
 app.use('/api/subjects', require('./routes/subjects'));
 app.use('/api/resources', require('./routes/resources'));
 app.use('/api/ask', require('./routes/ask'));

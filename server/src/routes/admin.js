@@ -70,6 +70,31 @@ router.patch('/users/:id', authenticate, authorize('admin'), async (req, res) =>
   }
 });
 
+// PATCH /api/admin/users/:id/class — assign academic class to user
+router.patch('/users/:id/class', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { academicClassId } = req.body;
+    if (academicClassId === undefined) {
+      return res.status(400).json({ error: 'academicClassId is required' });
+    }
+
+    const result = await pool.query(
+      `UPDATE users SET academic_class_id = $1, updated_at = now()
+       WHERE id = $2 RETURNING id, email, full_name, role, is_active, academic_class_id`,
+      [academicClassId || null, req.params.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ user: result.rows[0] });
+  } catch (err) {
+    console.error('Update user class error:', err);
+    res.status(500).json({ error: 'Failed to update user class' });
+  }
+});
+
 // GET /api/admin/logs — AI query logs (paginated)
 router.get('/logs', authenticate, authorize('admin'), async (req, res) => {
   try {

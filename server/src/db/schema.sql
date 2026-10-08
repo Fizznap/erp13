@@ -5,6 +5,41 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "vector";
 
 -- ============================================================
+-- ACADEMIC HIERARCHY
+-- ============================================================
+CREATE TABLE IF NOT EXISTS branches (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            VARCHAR(255) NOT NULL,
+    code            VARCHAR(50) UNIQUE NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS batches (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    start_year      INTEGER NOT NULL,
+    end_year        INTEGER NOT NULL,
+    UNIQUE(start_year, end_year)
+);
+
+CREATE TABLE IF NOT EXISTS divisions (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            VARCHAR(50) NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS semesters (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    number          INTEGER NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS academic_classes (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    branch_id       UUID NOT NULL REFERENCES branches(id),
+    batch_id        UUID NOT NULL REFERENCES batches(id),
+    division_id     UUID NOT NULL REFERENCES divisions(id),
+    semester_id     UUID NOT NULL REFERENCES semesters(id),
+    UNIQUE(branch_id, batch_id, division_id, semester_id)
+);
+
+-- ============================================================
 -- USERS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS users (
@@ -26,8 +61,20 @@ CREATE TABLE IF NOT EXISTS subjects (
     name            VARCHAR(255) NOT NULL,
     code            VARCHAR(50) UNIQUE NOT NULL,
     description     TEXT,
-    faculty_id      UUID NOT NULL REFERENCES users(id),
+    faculty_id      UUID REFERENCES users(id), -- Deprecated, use subject_offerings
     created_at      TIMESTAMPTZ DEFAULT now()
+);
+
+-- ============================================================
+-- SUBJECT OFFERINGS
+-- ============================================================
+CREATE TABLE IF NOT EXISTS subject_offerings (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    subject_id        UUID NOT NULL REFERENCES subjects(id),
+    academic_class_id UUID NOT NULL REFERENCES academic_classes(id),
+    faculty_id        UUID NOT NULL REFERENCES users(id),
+    created_at        TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(subject_id, academic_class_id)
 );
 
 -- ============================================================
@@ -146,3 +193,11 @@ CREATE TABLE IF NOT EXISTS ai_audit_logs (
 
 CREATE INDEX IF NOT EXISTS idx_ai_audit_logs_user ON ai_audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_ai_audit_logs_subject ON ai_audit_logs(subject_id);
+
+-- ============================================================
+-- MIGRATIONS (Idempotent schema updates for existing tables)
+-- ============================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS academic_class_id UUID REFERENCES academic_classes(id);
+ALTER TABLE subjects ALTER COLUMN faculty_id DROP NOT NULL;
+ALTER TABLE resources ADD COLUMN IF NOT EXISTS subject_offering_id UUID REFERENCES subject_offerings(id);
+ALTER TABLE attendance_sessions ADD COLUMN IF NOT EXISTS subject_offering_id UUID REFERENCES subject_offerings(id);

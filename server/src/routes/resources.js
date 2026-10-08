@@ -36,28 +36,46 @@ const upload = multer({
 // POST /api/resources/upload — upload a PDF
 router.post('/upload', authenticate, authorize('faculty'), upload.single('file'), async (req, res) => {
   try {
-    const { subjectId } = req.body;
-    if (!subjectId) {
-      // Clean up uploaded file
+    const { subjectOfferingId, subjectId } = req.body;
+    
+    // Support either subjectOfferingId (new) or subjectId (legacy)
+    if (!subjectOfferingId && !subjectId) {
       if (req.file) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: 'Subject ID is required' });
+      return res.status(400).json({ error: 'subjectOfferingId or subjectId is required' });
     }
 
-    // Verify faculty owns this subject
-    const subject = await pool.query(
-      'SELECT id FROM subjects WHERE id = $1 AND faculty_id = $2',
-      [subjectId, req.user.id]
-    );
-    if (subject.rows.length === 0) {
-      if (req.file) fs.unlinkSync(req.file.path);
-      return res.status(403).json({ error: 'You do not own this subject' });
+    let actualSubjectId = subjectId;
+    let offeringId = subjectOfferingId || null;
+
+    if (subjectOfferingId) {
+      // Verify faculty owns this offering
+      const offering = await pool.query(
+        'SELECT subject_id FROM subject_offerings WHERE id = $1 AND faculty_id = $2',
+        [subjectOfferingId, req.user.id]
+      );
+      if (offering.rows.length === 0) {
+        if (req.file) fs.unlinkSync(req.file.path);
+        return res.status(403).json({ error: 'You do not own this subject offering' });
+      }
+      actualSubjectId = offering.rows[0].subject_id;
+    } else {
+      // Legacy path
+      const subject = await pool.query(
+        'SELECT id FROM subjects WHERE id = $1 AND faculty_id = $2',
+        [subjectId, req.user.id]
+      );
+      if (subject.rows.length === 0) {
+        if (req.file) fs.unlinkSync(req.file.path);
+        return res.status(403).json({ error: 'You do not own this subject' });
+      }
     }
 
     const result = await pool.query(
-      `INSERT INTO resources (subject_id, uploaded_by, filename, original_name, file_path, file_size, mime_type, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued') RETURNING *`,
+      `INSERT INTO resources (subject_id, subject_offering_id, uploaded_by, filename, original_name, file_path, file_size, mime_type, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued') RETURNING *`,
       [
-        subjectId,
+        actualSubjectId,
+        offeringId,
         req.user.id,
         req.file.filename,
         req.file.originalname,
@@ -91,23 +109,36 @@ router.post('/upload', authenticate, authorize('faculty'), upload.single('file')
   }
 });
 
-// GET /api/resources?subjectId=X — list resources for a subject
+// GET /api/resources?subjectOfferingId=X — list resources for a subject offering
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { subjectId } = req.query;
-    if (!subjectId) {
-      return res.status(400).json({ error: 'subjectId query parameter is required' });
+    const { subjectOfferingId, subjectId } = req.query;
+    if (!subjectOfferingId && !subjectId) {
+      return res.status(400).json({ error: 'subjectOfferingId or subjectId query parameter is required' });
     }
 
-    const result = await pool.query(
-      `SELECT id, subject_id, filename, original_name, file_size, status,
-              summary, key_topics, bullet_points, page_count, chunk_count,
-              created_at, processed_at
-       FROM resources
-       WHERE subject_id = $1
-       ORDER BY created_at DESC`,
-      [subjectId]
-    );
+    let result;
+    if (subjectOfferingId) {
+      result = await pool.query(
+        `SELECT id, subject_id, subject_offering_id, filename, original_name, file_size, status,
+                summary, key_topics, bullet_points, page_count, chunk_count,
+                created_at, processed_at
+         FROM resources
+         WHERE subject_offering_id = $1
+         ORDER BY created_at DESC`,
+        [subjectOfferingId]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT id, subject_id, subject_offering_id, filename, original_name, file_size, status,
+                summary, key_topics, bullet_points, page_count, chunk_count,
+                created_at, processed_at
+         FROM resources
+         WHERE subject_id = $1
+         ORDER BY created_at DESC`,
+        [subjectId]
+      );
+    }
 
     res.json({ resources: result.rows });
   } catch (err) {
