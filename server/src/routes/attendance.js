@@ -372,7 +372,8 @@ router.get('/:sessionId/roster', authenticate, authorize('faculty', 'admin'), as
     const result = await pool.query(
       `SELECT u.id AS student_id, COALESCE(p.preferred_name, u.full_name) AS full_name,
               p.roll_number, u.email,
-              COALESCE(ar.status, 'absent') AS status, ar.marked_at,
+              CASE WHEN ar.status = 'rejected' THEN 'needs_review'
+                   ELSE COALESCE(ar.status, 'absent') END AS status, ar.marked_at,
               ar.verification_method, ar.rejection_reason
        FROM users u
        JOIN academic_classes student_class ON student_class.id = u.academic_class_id
