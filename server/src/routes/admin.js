@@ -73,9 +73,28 @@ router.patch('/users/:id', authenticate, authorize('admin'), async (req, res) =>
 // PATCH /api/admin/users/:id/class — assign academic class to user
 router.patch('/users/:id/class', authenticate, authorize('admin'), async (req, res) => {
   try {
-    const { academicClassId } = req.body;
+    const { academicClassId, academicLabGroupId } = req.body;
     if (academicClassId === undefined) {
       return res.status(400).json({ error: 'academicClassId is required' });
+    }
+
+    let labGroupId = academicLabGroupId || null;
+    if (academicClassId) {
+      if (!labGroupId) return res.status(400).json({ error: 'Choose a lab group for this class' });
+      const classResult = await pool.query(
+        'SELECT branch_id, batch_id, division_id FROM academic_classes WHERE id = $1',
+        [academicClassId]
+      );
+      if (!classResult.rows.length) return res.status(400).json({ error: 'Academic class not found' });
+      const academicClass = classResult.rows[0];
+      const groupResult = await pool.query(
+        `SELECT id FROM academic_lab_groups
+         WHERE id = $1 AND branch_id = $2 AND batch_id = $3 AND division_id = $4`,
+        [labGroupId, academicClass.branch_id, academicClass.batch_id, academicClass.division_id]
+      );
+      if (!groupResult.rows.length) return res.status(400).json({ error: 'Lab group does not belong to the selected class' });
+    } else {
+      labGroupId = null;
     }
 
     const result = await pool.query(
@@ -88,7 +107,14 @@ router.patch('/users/:id/class', authenticate, authorize('admin'), async (req, r
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json({ user: result.rows[0] });
+    await pool.query(
+      `INSERT INTO user_profiles (user_id, academic_lab_group_id) VALUES ($1, $2)
+       ON CONFLICT (user_id) DO UPDATE SET academic_lab_group_id = EXCLUDED.academic_lab_group_id,
+                                           updated_at = now()`,
+      [req.params.id, labGroupId]
+    );
+
+    res.json({ user: { ...result.rows[0], academic_lab_group_id: labGroupId } });
   } catch (err) {
     console.error('Update user class error:', err);
     res.status(500).json({ error: 'Failed to update user class' });

@@ -62,6 +62,29 @@ ORDER BY 1;
    columns to existing `users` tables. Existing records and roles are preserved;
    their email verification status defaults to false until they verify.
 
+## Academic divisions and lab attendance
+
+The additive student-profile migration creates configurable lab groups linked
+to a branch, admission batch, and division. It seeds the supplied CSE 2024–28
+Division B with semesters 1–8 and lab groups B1/B2. Other branch/division
+combinations must be configured by an administrator in Academic Management:
+create the division's semester classes, then add the lab groups (for example
+A1 and A2). Registration only offers groups that match the selected branch,
+batch, and division, and the API checks the same relationship before saving.
+
+Faculty choose the attendance scope when opening a session. Lecture sessions
+are for the complete academic class/division. Lab sessions require one of that
+class's configured groups, and the API checks the student's stored group before
+accepting attendance. Existing students are not moved or assigned a lab group
+by the migration. An administrator must review each student's records and use
+the class assignment controls to assign the right class and group; students
+without a lab group can still use their existing account and class-scoped
+lecture features, but cannot mark attendance for a lab group.
+
+The backend deployment runs `db:init`, which applies these idempotent schema and
+academic-configuration additions. No existing user, attendance, class, profile,
+or role records are deleted or reassigned by the migration.
+
 Google sign-in does not use a client secret: the browser obtains an ID token,
 and the API verifies it against Google's public signing keys. Keep `JWT_SECRET`
 generated and private in Render. Auth endpoints retain the existing 20-attempt

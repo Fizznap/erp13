@@ -42,9 +42,9 @@ function createAuthenticate({ allowOnboarding = false, requireOnboarding = false
               p.google_picture_url, p.preferred_name, p.college_id, p.program, p.roll_number,
               p.year_of_study, p.admission_year, p.expected_graduation_year, p.phone, p.bio,
               p.skills, p.interests, p.achievements, p.linkedin_url, p.github_url, p.portfolio_url,
-              p.registration_completed_at,
+              p.registration_completed_at, p.academic_lab_group_id,
               br.name AS branch_name, br.code AS branch_code, ba.start_year, ba.end_year,
-              d.name AS division_name, s.number AS semester_number
+              d.name AS division_name, s.number AS semester_number, lg.name AS lab_group_name
        FROM users u
        LEFT JOIN user_profiles p ON p.user_id = u.id
        LEFT JOIN academic_classes ac ON ac.id = u.academic_class_id
@@ -52,6 +52,7 @@ function createAuthenticate({ allowOnboarding = false, requireOnboarding = false
        LEFT JOIN batches ba ON ba.id = ac.batch_id
        LEFT JOIN divisions d ON d.id = ac.division_id
        LEFT JOIN semesters s ON s.id = ac.semester_id
+       LEFT JOIN academic_lab_groups lg ON lg.id = p.academic_lab_group_id
        WHERE u.id = $1`,
       [decoded.id]
     );
@@ -101,6 +102,8 @@ function createAuthenticate({ allowOnboarding = false, requireOnboarding = false
         semesterNumber: user.semester_number,
         batchStartYear: user.start_year,
         batchEndYear: user.end_year,
+        academicLabGroupId: user.academic_lab_group_id,
+        labGroupName: user.lab_group_name,
       },
     };
     return next();

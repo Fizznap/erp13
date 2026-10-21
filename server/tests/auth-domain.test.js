@@ -279,7 +279,7 @@ describe('college-domain authentication', () => {
     pool.query.mockResolvedValueOnce({ rows: [incomplete] });
     const response = await request(app).post('/api/auth/complete-profile').set('Authorization', `Bearer ${token}`).send({
       rollNumber: 'UST24R0102085', yearOfStudy: 3,
-      expectedGraduationYear: 2028, academicClassId: 'invented-class', userId: 'another-user',
+      expectedGraduationYear: 2028, academicClassId: 'invented-class', academicLabGroupId: 'lab-group', userId: 'another-user',
     });
     expect(response.status).toBe(400);
     expect(response.body.accessToken).toBeUndefined();
@@ -305,7 +305,7 @@ describe('college-domain authentication', () => {
     pool.__client.query.mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ id: 'class-id', branch_code: 'BTECH-AIML', start_year: 2024 }] });
     const response = await request(app).post('/api/auth/complete-profile').set('Authorization', `Bearer ${token}`).send({
-      rollNumber: 'UST24R0102085', yearOfStudy: 3, expectedGraduationYear: 2028, academicClassId: 'class-id',
+      rollNumber: 'UST24R0102085', yearOfStudy: 3, expectedGraduationYear: 2028, academicClassId: 'class-id', academicLabGroupId: 'lab-group',
     });
     expect(response.status).toBe(400);
     expect(response.body.accessToken).toBeUndefined();
@@ -321,7 +321,8 @@ describe('college-domain authentication', () => {
     const token = jwt.sign({ id: incomplete.id, purpose: 'onboarding' }, process.env.JWT_SECRET, { expiresIn: '30m' });
     pool.query.mockResolvedValueOnce({ rows: [incomplete] }).mockResolvedValueOnce({ rows: [complete] });
     pool.__client.query.mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ id: 'class-id', branch_code: 'BTECH-CSE', start_year: 2024 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 'class-id', branch_code: 'BTECH-CSE', start_year: 2024, semester_number: 5, branch_id: 'branch-id', batch_id: 'batch-id', division_id: 'division-id' }] })
+      .mockResolvedValueOnce({ rows: [{ id: 'lab-group' }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] });
@@ -330,7 +331,7 @@ describe('college-domain authentication', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         rollNumber: ' ust24r0102085 ', yearOfStudy: 3, expectedGraduationYear: 2028,
-        academicClassId: 'class-id', collegeId: 'ATTACKER-ID', program: 'Admin', admissionYear: 2001,
+        academicClassId: 'class-id', academicLabGroupId: 'lab-group', collegeId: 'ATTACKER-ID', program: 'Admin', admissionYear: 2001,
       });
 
     expect(response.status).toBe(200);
@@ -338,7 +339,7 @@ describe('college-domain authentication', () => {
     const profileInsert = pool.__client.query.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO user_profiles'));
     expect(profileInsert[1]).toEqual([
       incomplete.id, null, 'UST24R0102085', 'B.Tech', 'UST24R0102085', 3, 2024, 2028,
-      null, null, [], [], [], null, null, null,
+      null, null, [], [], [], null, null, null, 'lab-group',
     ]);
   });
 

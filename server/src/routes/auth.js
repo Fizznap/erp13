@@ -55,15 +55,17 @@ async function loadProfile(userId, db = pool) {
     `SELECT u.*, p.google_picture_url, p.preferred_name, p.college_id, p.program, p.roll_number,
             p.year_of_study, p.admission_year, p.expected_graduation_year, p.phone, p.bio,
             p.skills, p.interests, p.achievements, p.linkedin_url, p.github_url, p.portfolio_url,
-            p.registration_completed_at,
+            p.registration_completed_at, p.academic_lab_group_id,
             br.name AS branch_name, br.code AS branch_code, ba.start_year AS batch_start_year,
-            ba.end_year AS batch_end_year, d.name AS division_name, s.number AS semester_number
+            ba.end_year AS batch_end_year, d.name AS division_name, s.number AS semester_number,
+            lg.name AS lab_group_name
      FROM users u LEFT JOIN user_profiles p ON p.user_id = u.id
      LEFT JOIN academic_classes ac ON ac.id = u.academic_class_id
      LEFT JOIN branches br ON br.id = ac.branch_id
      LEFT JOIN batches ba ON ba.id = ac.batch_id
      LEFT JOIN divisions d ON d.id = ac.division_id
      LEFT JOIN semesters s ON s.id = ac.semester_id
+     LEFT JOIN academic_lab_groups lg ON lg.id = p.academic_lab_group_id
      WHERE u.id = $1`,
     [userId]
   );
@@ -92,6 +94,8 @@ function profilePayload(user) {
     branchCode: user.branch_code || null,
     divisionName: user.division_name || null,
     semesterNumber: user.semester_number || null,
+    academicLabGroupId: user.academic_lab_group_id || null,
+    labGroupName: user.lab_group_name || null,
     batchStartYear: user.batch_start_year || null,
     batchEndYear: user.batch_end_year || null,
   };
@@ -412,7 +416,7 @@ router.get('/me', authenticateForProfile, async (req, res) => {
 router.get('/onboarding/options', authenticateOnboarding, async (_req, res) => {
   try {
     const result = await pool.query(`
-      SELECT ac.id, br.name AS branch_name, br.code AS branch_code,
+      SELECT ac.id, ac.branch_id, ac.batch_id, ac.division_id, br.name AS branch_name, br.code AS branch_code,
              ba.start_year, ba.end_year, d.name AS division_name, s.number AS semester_number
       FROM academic_classes ac
       JOIN branches br ON br.id = ac.branch_id
@@ -421,7 +425,16 @@ router.get('/onboarding/options', authenticateOnboarding, async (_req, res) => {
       JOIN semesters s ON s.id = ac.semester_id
       ORDER BY br.name, ba.start_year DESC, d.name, s.number
     `);
-    res.json({ classes: result.rows });
+    const groups = await pool.query(`
+      SELECT g.id, g.branch_id, g.batch_id, g.division_id, g.name,
+             br.code AS branch_code, ba.start_year, ba.end_year, d.name AS division_name
+      FROM academic_lab_groups g
+      JOIN branches br ON br.id = g.branch_id
+      JOIN batches ba ON ba.id = g.batch_id
+      JOIN divisions d ON d.id = g.division_id
+      ORDER BY br.name, ba.start_year DESC, d.name, g.name
+    `);
+    res.json({ classes: result.rows, labGroups: groups.rows });
   } catch (err) {
     console.error('Onboarding options error:', err);
     res.status(500).json({ error: 'Could not load configured academic classes' });
@@ -438,6 +451,7 @@ router.post('/complete-profile', authenticateOnboarding, async (req, res) => {
   const admissionYear = roll?.admissionYear;
   const expectedGraduationYear = Number(body.expectedGraduationYear);
   const academicClassId = cleanString(body.academicClassId, 64, { required: true });
+  const academicLabGroupId = cleanString(body.academicLabGroupId, 64, { required: true });
   const preferredName = cleanString(body.preferredName || '', 80);
   const phone = cleanString(body.phone || '', 32);
   const bio = cleanString(body.bio || '', 500);
@@ -448,7 +462,7 @@ router.post('/complete-profile', authenticateOnboarding, async (req, res) => {
   const githubUrl = safeUrl(body.githubUrl);
   const portfolioUrl = safeUrl(body.portfolioUrl);
   const optionalTextInvalid = [preferredName, phone, bio].includes(null);
-  if (!collegeId || !program || !rollNumber || !academicClassId || optionalTextInvalid ||
+  if (!collegeId || !program || !rollNumber || !academicClassId || !academicLabGroupId || optionalTextInvalid ||
       !Number.isInteger(yearOfStudy) || yearOfStudy < 1 || yearOfStudy > 4 ||
       !Number.isInteger(admissionYear) || admissionYear < 2000 || admissionYear > new Date().getFullYear() + 1 ||
       !Number.isInteger(expectedGraduationYear) || expectedGraduationYear < admissionYear + yearOfStudy - 1 || expectedGraduationYear > admissionYear + 8 ||
@@ -461,25 +475,39 @@ router.post('/complete-profile', authenticateOnboarding, async (req, res) => {
   try {
     await client.query('BEGIN');
     const classResult = await client.query(
-      `SELECT ac.id, br.code AS branch_code, ba.start_year
+      `SELECT ac.id, ac.branch_id, ac.batch_id, ac.division_id,
+              br.code AS branch_code, ba.start_year, s.number AS semester_number
        FROM academic_classes ac
        JOIN branches br ON br.id = ac.branch_id
        JOIN batches ba ON ba.id = ac.batch_id
+       JOIN semesters s ON s.id = ac.semester_id
        WHERE ac.id = $1`,
       [academicClassId]
     );
     const selectedClass = classResult.rows[0];
+    const firstSemesterOfYear = (yearOfStudy - 1) * 2 + 1;
     if (!selectedClass || canonicalBranchCode(selectedClass.branch_code) !== roll.branch.code ||
-        Number(selectedClass.start_year) !== admissionYear) {
+        Number(selectedClass.start_year) !== admissionYear ||
+        Number(selectedClass.semester_number) < firstSemesterOfYear ||
+        Number(selectedClass.semester_number) > firstSemesterOfYear + 1) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Select a configured class that matches your roll number branch and admission batch' });
+    }
+    const groupResult = await client.query(
+      `SELECT id FROM academic_lab_groups
+       WHERE id = $1 AND branch_id = $2 AND batch_id = $3 AND division_id = $4`,
+      [academicLabGroupId, selectedClass.branch_id, selectedClass.batch_id, selectedClass.division_id]
+    );
+    if (!groupResult.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Select a lab group configured for your branch, batch, and division' });
     }
     await client.query(
       `INSERT INTO user_profiles
        (user_id, preferred_name, college_id, program, roll_number, year_of_study, admission_year,
         expected_graduation_year, phone, bio, skills, interests, achievements, linkedin_url, github_url,
-        portfolio_url, registration_completed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,now())
+        portfolio_url, academic_lab_group_id, registration_completed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now())
        ON CONFLICT (user_id) DO UPDATE SET
          preferred_name=EXCLUDED.preferred_name, college_id=EXCLUDED.college_id, program=EXCLUDED.program,
          roll_number=EXCLUDED.roll_number, year_of_study=EXCLUDED.year_of_study,
@@ -487,10 +515,11 @@ router.post('/complete-profile', authenticateOnboarding, async (req, res) => {
          phone=EXCLUDED.phone, bio=EXCLUDED.bio, skills=EXCLUDED.skills, interests=EXCLUDED.interests,
          achievements=EXCLUDED.achievements, linkedin_url=EXCLUDED.linkedin_url,
          github_url=EXCLUDED.github_url, portfolio_url=EXCLUDED.portfolio_url,
+         academic_lab_group_id=EXCLUDED.academic_lab_group_id,
          registration_completed_at=COALESCE(user_profiles.registration_completed_at, now()), updated_at=now()`,
       [req.user.id, preferredName || null, collegeId, program, rollNumber, yearOfStudy, admissionYear,
         expectedGraduationYear, phone || null, bio || null, skills, interests, achievements,
-        linkedinUrl, githubUrl, portfolioUrl]
+        linkedinUrl, githubUrl, portfolioUrl, academicLabGroupId]
     );
     await client.query(
       'UPDATE users SET academic_class_id = $1, full_name = COALESCE(NULLIF($2, \'\'), full_name), updated_at = now() WHERE id = $3',

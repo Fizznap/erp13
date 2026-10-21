@@ -33,6 +33,7 @@ router.get('/', authenticate, async (req, res) => {
       result = await pool.query(
         `SELECT s.*, so.id AS offering_id, 
                 br.name AS branch_name, d.name AS division_name, ba.start_year AS batch_year, s2.number AS semester_number,
+                ac.branch_id, ac.batch_id, ac.division_id,
                 (SELECT full_name FROM users WHERE id = so.faculty_id) AS faculty_name,
                 (SELECT COUNT(*) FROM resources WHERE subject_offering_id = so.id) AS resource_count
          FROM subject_offerings so
@@ -48,6 +49,7 @@ router.get('/', authenticate, async (req, res) => {
          
          SELECT s.*, null AS offering_id,
                 null AS branch_name, null AS division_name, null AS batch_year, null AS semester_number,
+                null AS branch_id, null AS batch_id, null AS division_id,
                 (SELECT full_name FROM users WHERE id = s.faculty_id) AS faculty_name,
                 (SELECT COUNT(*) FROM resources WHERE subject_id = s.id AND subject_offering_id IS NULL) AS resource_count
          FROM subjects s

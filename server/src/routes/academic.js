@@ -25,6 +25,15 @@ router.get('/hierarchy', authenticate, async (req, res) => {
       JOIN divisions d ON ac.division_id = d.id
       JOIN semesters s ON ac.semester_id = s.id
     `);
+    const labGroups = await pool.query(`
+      SELECT g.*, br.name AS branch_name, br.code AS branch_code,
+             ba.start_year, ba.end_year, d.name AS division_name
+      FROM academic_lab_groups g
+      JOIN branches br ON br.id = g.branch_id
+      JOIN batches ba ON ba.id = g.batch_id
+      JOIN divisions d ON d.id = g.division_id
+      ORDER BY br.name, ba.start_year DESC, d.name, g.name
+    `);
 
     res.json({
       branches: branches.rows,
@@ -33,7 +42,8 @@ router.get('/hierarchy', authenticate, async (req, res) => {
       semesters: semesters.rows,
       classes: classes.rows,
       subjects: subjects.rows,
-      faculty: faculty.rows
+      faculty: faculty.rows,
+      labGroups: labGroups.rows
     });
   } catch (err) {
     console.error('Get hierarchy error:', err);
@@ -105,6 +115,31 @@ router.post('/classes', authenticate, authorize('admin'), async (req, res) => {
     res.status(201).json({ academicClass: result.rows[0] });
   } catch (err) {
     res.status(500).json({ error: 'Failed to create academic class: ' + err.message });
+  }
+});
+
+// POST /api/academic/lab-groups — configure the groups used for lab attendance.
+router.post('/lab-groups', authenticate, authorize('admin'), async (req, res) => {
+  const { branchId, batchId, divisionId } = req.body || {};
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim().toUpperCase() : '';
+  if (!branchId || !batchId || !divisionId || !/^[A-Z0-9][A-Z0-9 -]{0,49}$/.test(name)) {
+    return res.status(400).json({ error: 'Branch, batch, division, and a valid group name are required' });
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO academic_lab_groups (branch_id, batch_id, division_id, name)
+       SELECT br.id, ba.id, d.id, $4
+       FROM branches br CROSS JOIN batches ba CROSS JOIN divisions d
+       WHERE br.id = $1 AND ba.id = $2 AND d.id = $3
+       RETURNING *`,
+      [branchId, batchId, divisionId, name]
+    );
+    if (!result.rows.length) return res.status(400).json({ error: 'Select a configured branch, batch, and division' });
+    return res.status(201).json({ labGroup: result.rows[0] });
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'That lab group already exists for this division' });
+    console.error('Create lab group error:', err);
+    return res.status(500).json({ error: 'Failed to create lab group' });
   }
 });
 

@@ -14,6 +14,8 @@ function generateNonce() {
 router.post('/start', authenticate, authorize('faculty'), async (req, res) => {
   try {
     const { subjectOfferingId, subjectId, latitude, longitude, radiusMeters } = req.body;
+    const sessionType = req.body.sessionType === 'lab' ? 'lab' : 'lecture';
+    const academicLabGroupId = req.body.academicLabGroupId || null;
 
     if ((!subjectOfferingId && !subjectId) || latitude == null || longitude == null) {
       return res.status(400).json({ error: 'subjectOfferingId, latitude, and longitude are required' });
@@ -21,16 +23,21 @@ router.post('/start', authenticate, authorize('faculty'), async (req, res) => {
 
     let actualSubjectId = subjectId;
     let actualOfferingId = subjectOfferingId || null;
+    let offeringClass;
 
     if (subjectOfferingId) {
       const offering = await pool.query(
-        'SELECT subject_id FROM subject_offerings WHERE id = $1 AND faculty_id = $2',
+        `SELECT so.subject_id, ac.branch_id, ac.batch_id, ac.division_id
+         FROM subject_offerings so
+         JOIN academic_classes ac ON ac.id = so.academic_class_id
+         WHERE so.id = $1 AND so.faculty_id = $2`,
         [subjectOfferingId, req.user.id]
       );
       if (offering.rows.length === 0) {
         return res.status(403).json({ error: 'You do not own this subject offering' });
       }
       actualSubjectId = offering.rows[0].subject_id;
+      offeringClass = offering.rows[0];
     } else {
       const subject = await pool.query(
         'SELECT id FROM subjects WHERE id = $1 AND faculty_id = $2',
@@ -39,6 +46,20 @@ router.post('/start', authenticate, authorize('faculty'), async (req, res) => {
       if (subject.rows.length === 0) {
         return res.status(403).json({ error: 'You do not own this subject' });
       }
+    }
+
+    if (sessionType === 'lab') {
+      if (!actualOfferingId || !academicLabGroupId) {
+        return res.status(400).json({ error: 'Lab attendance requires a subject offering and lab group' });
+      }
+      const group = await pool.query(
+        `SELECT id FROM academic_lab_groups
+         WHERE id = $1 AND branch_id = $2 AND batch_id = $3 AND division_id = $4`,
+        [academicLabGroupId, offeringClass.branch_id, offeringClass.batch_id, offeringClass.division_id]
+      );
+      if (!group.rows.length) return res.status(400).json({ error: 'Select a lab group configured for this class' });
+    } else if (academicLabGroupId) {
+      return res.status(400).json({ error: 'Lecture attendance is division-wide and cannot target a lab group' });
     }
 
     // End any existing active sessions
@@ -60,9 +81,9 @@ router.post('/start', authenticate, authorize('faculty'), async (req, res) => {
     const nonceExpires = new Date(Date.now() + 30 * 1000); // 30 seconds
 
     const result = await pool.query(
-      `INSERT INTO attendance_sessions (subject_id, subject_offering_id, faculty_id, latitude, longitude, radius_meters, active_nonce, nonce_expires)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [actualSubjectId, actualOfferingId, req.user.id, latitude, longitude, radiusMeters || 50, nonce, nonceExpires]
+      `INSERT INTO attendance_sessions (subject_id, subject_offering_id, academic_lab_group_id, faculty_id, latitude, longitude, radius_meters, active_nonce, nonce_expires)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [actualSubjectId, actualOfferingId, academicLabGroupId, req.user.id, latitude, longitude, radiusMeters || 50, nonce, nonceExpires]
     );
 
     res.status(201).json({ session: result.rows[0] });
@@ -112,7 +133,7 @@ router.post('/mark', authenticate, authorize('student'), async (req, res) => {
     const deviceId = req.headers['x-device-id'] || 'unknown-device';
     const locHash = crypto.createHash('sha256').update(`${latitude},${longitude}`).digest('hex');
 
-    if (!(sessionId || subjectOfferingId || subjectId || nonce) || latitude == null || longitude == null) {
+    if (!(sessionId || subjectOfferingId || subjectId || nonce) || typeof nonce !== 'string' || !nonce || latitude == null || longitude == null) {
       return res.status(400).json({ error: 'sessionId (or offering/subject/nonce), latitude, and longitude are required' });
     }
 
@@ -148,9 +169,16 @@ router.post('/mark', authenticate, authorize('student'), async (req, res) => {
     const actualSessionId = session.id;
 
     // Verify student is enrolled in this offering
-    const userRec = await pool.query('SELECT academic_class_id FROM users WHERE id = $1', [req.user.id]);
+    const userRec = await pool.query(
+      'SELECT u.academic_class_id, p.academic_lab_group_id FROM users u LEFT JOIN user_profiles p ON p.user_id = u.id WHERE u.id = $1',
+      [req.user.id]
+    );
     const classId = userRec.rows[0]?.academic_class_id;
     if (!classId) return res.status(403).json({ error: 'You are not assigned to an academic class' });
+
+    if (session.academic_lab_group_id && userRec.rows[0]?.academic_lab_group_id !== session.academic_lab_group_id) {
+      return res.status(403).json({ error: 'You are not assigned to this lab group' });
+    }
 
     if (session.subject_offering_id) {
       const offering = await pool.query('SELECT id FROM subject_offerings WHERE id = $1 AND academic_class_id = $2', [session.subject_offering_id, classId]);

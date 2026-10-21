@@ -24,7 +24,7 @@ function parseStudentRollNumber(value) {
   const branchPrefix = match.groups.branchPrefix;
   const branch = BRANCHES_BY_PREFIX[branchPrefix] || {
     code: 'BTECH-CYS',
-    name: 'B.Tech Cyber Security',
+    name: 'B.Tech Cyber Security and Digital Forensics',
   };
 
   return { normalized, admissionYear, branchPrefix, branch };
