@@ -278,19 +278,75 @@ describe('college-domain authentication', () => {
     const token = jwt.sign({ id: incomplete.id, purpose: 'onboarding' }, process.env.JWT_SECRET, { expiresIn: '30m' });
     pool.query.mockResolvedValueOnce({ rows: [incomplete] });
     const response = await request(app).post('/api/auth/complete-profile').set('Authorization', `Bearer ${token}`).send({
-      collegeId: 'ID-2', program: 'Engineering', rollNumber: '10', yearOfStudy: 1,
-      admissionYear: 2025, expectedGraduationYear: 2029, academicClassId: 'invented-class', userId: 'another-user',
+      rollNumber: 'UST24R0102085', yearOfStudy: 3,
+      expectedGraduationYear: 2028, academicClassId: 'invented-class', userId: 'another-user',
     });
     expect(response.status).toBe(400);
     expect(response.body.accessToken).toBeUndefined();
-    expect(pool.__client.query).toHaveBeenCalledWith('SELECT id FROM academic_classes WHERE id = $1', ['invented-class']);
+    expect(pool.__client.query.mock.calls.some(([sql, params]) => String(sql).includes('JOIN branches') && params[0] === 'invented-class')).toBe(true);
+  });
+
+  test('onboarding rejects malformed roll numbers without creating a session', async () => {
+    const incomplete = makeUser({ college_id: null, program: null, roll_number: null, year_of_study: null, admission_year: null, expected_graduation_year: null, academic_class_id: null });
+    const token = jwt.sign({ id: incomplete.id, purpose: 'onboarding' }, process.env.JWT_SECRET, { expiresIn: '30m' });
+    pool.query.mockResolvedValueOnce({ rows: [incomplete] });
+    const response = await request(app).post('/api/auth/complete-profile').set('Authorization', `Bearer ${token}`).send({
+      rollNumber: 'UST24L0102085', yearOfStudy: 3, expectedGraduationYear: 2028, academicClassId: 'class-id',
+    });
+    expect(response.status).toBe(400);
+    expect(response.body.accessToken).toBeUndefined();
+    expect(pool.connect).not.toHaveBeenCalled();
+  });
+
+  test('onboarding rejects a class from a different branch than the roll number', async () => {
+    const incomplete = makeUser({ college_id: null, program: null, roll_number: null, year_of_study: null, admission_year: null, expected_graduation_year: null, academic_class_id: null });
+    const token = jwt.sign({ id: incomplete.id, purpose: 'onboarding' }, process.env.JWT_SECRET, { expiresIn: '30m' });
+    pool.query.mockResolvedValueOnce({ rows: [incomplete] });
+    pool.__client.query.mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: 'class-id', branch_code: 'BTECH-AIML', start_year: 2024 }] });
+    const response = await request(app).post('/api/auth/complete-profile').set('Authorization', `Bearer ${token}`).send({
+      rollNumber: 'UST24R0102085', yearOfStudy: 3, expectedGraduationYear: 2028, academicClassId: 'class-id',
+    });
+    expect(response.status).toBe(400);
+    expect(response.body.accessToken).toBeUndefined();
+    expect(pool.__client.query).toHaveBeenCalledWith('ROLLBACK');
+  });
+
+  test('onboarding derives PRN, program, and batch from the roll number instead of trusting the browser', async () => {
+    const incomplete = makeUser({ college_id: null, program: null, roll_number: null, year_of_study: null, admission_year: null, expected_graduation_year: null, academic_class_id: null });
+    const complete = makeUser({
+      college_id: 'UST24R0102085', program: 'B.Tech', roll_number: 'UST24R0102085',
+      year_of_study: 3, admission_year: 2024, expected_graduation_year: 2028, academic_class_id: 'class-id',
+    });
+    const token = jwt.sign({ id: incomplete.id, purpose: 'onboarding' }, process.env.JWT_SECRET, { expiresIn: '30m' });
+    pool.query.mockResolvedValueOnce({ rows: [incomplete] }).mockResolvedValueOnce({ rows: [complete] });
+    pool.__client.query.mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: 'class-id', branch_code: 'BTECH-CSE', start_year: 2024 }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    const response = await request(app).post('/api/auth/complete-profile')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        rollNumber: ' ust24r0102085 ', yearOfStudy: 3, expectedGraduationYear: 2028,
+        academicClassId: 'class-id', collegeId: 'ATTACKER-ID', program: 'Admin', admissionYear: 2001,
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.requiresOnboarding).toBe(false);
+    const profileInsert = pool.__client.query.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO user_profiles'));
+    expect(profileInsert[1]).toEqual([
+      incomplete.id, null, 'UST24R0102085', 'B.Tech', 'UST24R0102085', 3, 2024, 2028,
+      null, null, [], [], [], null, null, null,
+    ]);
   });
 
   test('profile endpoints reject browser-supplied role and email changes', async () => {
     const accessToken = jwt.sign({ id: 'college-user-id' }, process.env.JWT_SECRET);
     pool.query.mockResolvedValueOnce({ rows: [makeUser()] });
     const response = await request(app).patch('/api/auth/me').set('Authorization', `Bearer ${accessToken}`).send({
-      email: 'attacker@ustu.edu.in', role: 'admin',
+      email: 'attacker@ustu.edu.in', role: 'admin', rollNumber: 'UST24R0102085', collegeId: 'UST24R0102085',
     });
     expect(response.status).toBe(400);
     expect(pool.query).toHaveBeenCalledTimes(1);

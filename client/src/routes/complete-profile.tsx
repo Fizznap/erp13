@@ -33,11 +33,8 @@ type ClassOption = {
 };
 type FormKey =
   | "preferredName"
-  | "collegeId"
-  | "program"
   | "rollNumber"
   | "yearOfStudy"
-  | "admissionYear"
   | "expectedGraduationYear"
   | "academicClassId"
   | "phone"
@@ -49,6 +46,28 @@ type FormKey =
   | "githubUrl"
   | "portfolioUrl";
 type FormValues = Partial<Record<FormKey, string>>;
+
+function getRollDetails(value: string) {
+  const match = /^UST(\d{2})R(01\d{2})\d{2,3}$/i.exec(value.trim());
+  if (!match) return null;
+  const prefix = match[2];
+  const branch =
+    prefix === "0101"
+      ? { code: "BTECH-AIML", name: "B.Tech Artificial Intelligence and Machine Learning" }
+      : prefix === "0102"
+        ? { code: "BTECH-CSE", name: "B.Tech Computer Science and Engineering" }
+        : { code: "BTECH-CYS", name: "B.Tech Cyber Security" };
+  return { admissionYear: 2000 + Number(match[1]), branch };
+}
+
+function canonicalBranchCode(code: string) {
+  const normalized = code.trim().toUpperCase();
+  if (["BTECH-AIML", "AIML", "AI-ML"].includes(normalized)) return "BTECH-AIML";
+  if (["BTECH-CSE", "CSE", "CE"].includes(normalized)) return "BTECH-CSE";
+  if (["BTECH-CYS", "CYS", "CSDF", "CYBER", "CYBER-SECURITY"].includes(normalized))
+    return "BTECH-CYS";
+  return null;
+}
 
 export const Route = createFileRoute("/complete-profile")({
   ssr: false,
@@ -90,11 +109,8 @@ function CompleteProfile() {
         const profile = me.user.profile || {};
         setValues({
           preferredName: profile.preferredName || me.user.fullName || "",
-          collegeId: profile.collegeId || "",
-          program: profile.program || "",
           rollNumber: profile.rollNumber || "",
           yearOfStudy: profile.yearOfStudy ? String(profile.yearOfStudy) : "",
-          admissionYear: profile.admissionYear ? String(profile.admissionYear) : "",
           expectedGraduationYear: profile.expectedGraduationYear
             ? String(profile.expectedGraduationYear)
             : "",
@@ -125,6 +141,17 @@ function CompleteProfile() {
     () => classes.find((item) => item.id === values.academicClassId),
     [classes, values.academicClassId],
   );
+  const rollDetails = useMemo(() => getRollDetails(values.rollNumber || ""), [values.rollNumber]);
+  const matchingClasses = useMemo(
+    () =>
+      classes.filter(
+        (item) =>
+          rollDetails &&
+          canonicalBranchCode(item.branch_code) === rollDetails.branch.code &&
+          Number(item.start_year) === rollDetails.admissionYear,
+      ),
+    [classes, rollDetails],
+  );
   const update = (key: FormKey, value: string) =>
     setValues((current) => ({ ...current, [key]: value }));
   const field = (key: FormKey, label: string, required = false, type = "text") => (
@@ -151,19 +178,21 @@ function CompleteProfile() {
     }
     if (
       step === 1 &&
-      (!values.collegeId?.trim() ||
-        !values.program?.trim() ||
-        !values.rollNumber?.trim() ||
+      (!rollDetails ||
         !values.yearOfStudy ||
-        !values.admissionYear ||
         !values.expectedGraduationYear ||
         !values.academicClassId)
     ) {
       setError("Complete all required academic fields before continuing.");
       return false;
     }
-    if (step === 1 && Number(values.expectedGraduationYear) < Number(values.admissionYear)) {
-      setError("Expected graduation year must be after admission year.");
+    if (
+      step === 1 &&
+      rollDetails &&
+      Number(values.expectedGraduationYear) <
+        rollDetails.admissionYear + Number(values.yearOfStudy) - 1
+    ) {
+      setError("Expected graduation year must allow for your current year of study.");
       return false;
     }
     setError("");
@@ -189,11 +218,8 @@ function CompleteProfile() {
         method: "POST",
         body: {
           preferredName: values.preferredName,
-          collegeId: values.collegeId,
-          program: values.program,
           rollNumber: values.rollNumber,
           yearOfStudy: Number(values.yearOfStudy),
-          admissionYear: Number(values.admissionYear),
           expectedGraduationYear: Number(values.expectedGraduationYear),
           academicClassId: values.academicClassId,
           phone: values.phone,
@@ -283,24 +309,66 @@ function CompleteProfile() {
           )}
           {step === 1 && (
             <>
-              {field("collegeId", "College ID / PRN (self-reported)", true)}
-              {field("program", "Program", true)}
-              {field("rollNumber", "Roll number", true)}
-              <div className="grid grid-cols-2 gap-3">
-                {field("yearOfStudy", "Study year", true, "number")}
-                {field("admissionYear", "Admission year", true, "number")}
-              </div>
+              <label className="block">
+                <span className={labelClass}>Roll number / PRN *</span>
+                <input
+                  className={inputClass}
+                  required
+                  maxLength={20}
+                  value={values.rollNumber || ""}
+                  onChange={(e) =>
+                    setValues((current) => ({
+                      ...current,
+                      rollNumber: e.target.value,
+                      academicClassId: "",
+                    }))
+                  }
+                />
+              </label>
+              {rollDetails ? (
+                <p className="text-xs text-muted-foreground">
+                  {rollDetails.branch.name} · Admission batch {rollDetails.admissionYear}. Your PRN
+                  is the same as your roll number.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Enter a roll number such as UST24R0102085 to identify your branch.
+                </p>
+              )}
+              <label className="block">
+                <span className={labelClass}>Current year *</span>
+                <select
+                  className={inputClass}
+                  required
+                  value={values.yearOfStudy || ""}
+                  onChange={(e) => update("yearOfStudy", e.target.value)}
+                >
+                  <option value="">Select current year</option>
+                  {[1, 2, 3, 4].map((year) => (
+                    <option key={year} value={year}>
+                      {["", "First", "Second", "Third", "Fourth"][year]} year
+                    </option>
+                  ))}
+                </select>
+              </label>
               {field("expectedGraduationYear", "Expected graduation year", true, "number")}
               <label className="block">
-                <span className={labelClass}>Branch, batch, division and semester *</span>
+                <span className={labelClass}>Class, division and semester *</span>
                 <select
                   className={inputClass}
                   required
                   value={values.academicClassId || ""}
                   onChange={(e) => update("academicClassId", e.target.value)}
+                  disabled={!rollDetails}
                 >
-                  <option value="">Select configured class</option>
-                  {classes.map((item) => (
+                  <option value="">
+                    {!rollDetails
+                      ? "Enter a valid roll number first"
+                      : matchingClasses.length
+                        ? "Select your configured class"
+                        : "No classes configured for this branch and batch"}
+                  </option>
+                  {matchingClasses.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.branch_name} ({item.branch_code}) · {item.start_year}–{item.end_year} ·{" "}
                       {item.division_name} · Semester {item.semester_number}
@@ -310,7 +378,14 @@ function CompleteProfile() {
               </label>
               {selectedClass && (
                 <p className="text-xs text-muted-foreground">
-                  Class assignment uses the administrator-configured academic hierarchy.
+                  Class assignment uses the administrator-configured academic hierarchy and must
+                  match the branch and batch from your roll number.
+                </p>
+              )}
+              {rollDetails && matchingClasses.length === 0 && (
+                <p className="text-xs text-destructive">
+                  Ask an administrator to configure academic classes for this branch and admission
+                  batch before completing registration.
                 </p>
               )}
             </>
@@ -345,19 +420,17 @@ function CompleteProfile() {
                 <strong>College email:</strong> {user.email}
               </p>
               <p>
-                <strong>College ID / PRN:</strong> {values.collegeId}{" "}
-                <span className="text-xs text-muted-foreground">(self-reported)</span>
+                <strong>Roll number / PRN:</strong> {values.rollNumber}
               </p>
               <p>
-                <strong>Program / branch:</strong> {values.program} /{" "}
-                {selectedClass?.branch_name || "—"}
+                <strong>Program / branch:</strong> B.Tech / {rollDetails?.branch.name || "—"}
               </p>
               <p>
                 <strong>Roll / study year:</strong> {values.rollNumber} / {values.yearOfStudy}
               </p>
               <p>
-                <strong>Admission / expected graduation:</strong> {values.admissionYear} /{" "}
-                {values.expectedGraduationYear}
+                <strong>Admission batch / expected graduation:</strong>{" "}
+                {rollDetails?.admissionYear || "—"} / {values.expectedGraduationYear}
               </p>
               <p>
                 <strong>Class:</strong>{" "}

@@ -6,6 +6,7 @@ const { pool } = require('../db/pool');
 const { authenticate, authenticateForProfile, authenticateOnboarding, isProfileComplete } = require('../middleware/auth');
 const { authLimiter } = require('../middleware/rateLimit');
 const { isCollegeEmail, normalizeEmail } = require('../utils/collegeEmail');
+const { parseStudentRollNumber, canonicalBranchCode } = require('../utils/studentRollNumber');
 const { verifyGoogleIdToken, GoogleIdentityConfigurationError } = require('../services/googleIdentity');
 const {
   makeVerificationToken,
@@ -429,11 +430,12 @@ router.get('/onboarding/options', authenticateOnboarding, async (_req, res) => {
 
 router.post('/complete-profile', authenticateOnboarding, async (req, res) => {
   const body = req.body || {};
-  const collegeId = cleanString(body.collegeId, 40, { required: true });
-  const program = cleanString(body.program, 160, { required: true });
-  const rollNumber = cleanString(body.rollNumber, 40, { required: true });
+  const roll = parseStudentRollNumber(body.rollNumber);
+  const collegeId = roll?.normalized || null;
+  const program = 'B.Tech';
+  const rollNumber = collegeId;
   const yearOfStudy = Number(body.yearOfStudy);
-  const admissionYear = Number(body.admissionYear);
+  const admissionYear = roll?.admissionYear;
   const expectedGraduationYear = Number(body.expectedGraduationYear);
   const academicClassId = cleanString(body.academicClassId, 64, { required: true });
   const preferredName = cleanString(body.preferredName || '', 80);
@@ -447,9 +449,9 @@ router.post('/complete-profile', authenticateOnboarding, async (req, res) => {
   const portfolioUrl = safeUrl(body.portfolioUrl);
   const optionalTextInvalid = [preferredName, phone, bio].includes(null);
   if (!collegeId || !program || !rollNumber || !academicClassId || optionalTextInvalid ||
-      !Number.isInteger(yearOfStudy) || yearOfStudy < 1 || yearOfStudy > 10 ||
+      !Number.isInteger(yearOfStudy) || yearOfStudy < 1 || yearOfStudy > 4 ||
       !Number.isInteger(admissionYear) || admissionYear < 2000 || admissionYear > new Date().getFullYear() + 1 ||
-      !Number.isInteger(expectedGraduationYear) || expectedGraduationYear < admissionYear || expectedGraduationYear > admissionYear + 12 ||
+      !Number.isInteger(expectedGraduationYear) || expectedGraduationYear < admissionYear + yearOfStudy - 1 || expectedGraduationYear > admissionYear + 8 ||
       !skills || !interests || !achievements ||
       linkedinUrl === undefined || githubUrl === undefined || portfolioUrl === undefined) {
     return res.status(400).json({ error: 'Check the required profile fields and optional details' });
@@ -458,10 +460,19 @@ router.post('/complete-profile', authenticateOnboarding, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const classResult = await client.query('SELECT id FROM academic_classes WHERE id = $1', [academicClassId]);
-    if (!classResult.rows.length) {
+    const classResult = await client.query(
+      `SELECT ac.id, br.code AS branch_code, ba.start_year
+       FROM academic_classes ac
+       JOIN branches br ON br.id = ac.branch_id
+       JOIN batches ba ON ba.id = ac.batch_id
+       WHERE ac.id = $1`,
+      [academicClassId]
+    );
+    const selectedClass = classResult.rows[0];
+    if (!selectedClass || canonicalBranchCode(selectedClass.branch_code) !== roll.branch.code ||
+        Number(selectedClass.start_year) !== admissionYear) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Select an academic class from the configured options' });
+      return res.status(400).json({ error: 'Select a configured class that matches your roll number branch and admission batch' });
     }
     await client.query(
       `INSERT INTO user_profiles
@@ -550,8 +561,10 @@ router.patch('/me', authenticate, async (req, res) => {
       profileValues.push(value === '' ? null : value);
     }
 
-    if (req.body?.email !== undefined || req.body?.role !== undefined || req.body?.academicClassId !== undefined) {
-      return res.status(400).json({ error: 'Email, role, and class assignment cannot be changed here' });
+    if (req.body?.email !== undefined || req.body?.role !== undefined || req.body?.academicClassId !== undefined ||
+        req.body?.collegeId !== undefined || req.body?.program !== undefined || req.body?.rollNumber !== undefined ||
+        req.body?.admissionYear !== undefined) {
+      return res.status(400).json({ error: 'Email, role, roll number / PRN, branch, admission batch, and class assignment cannot be changed here' });
     }
 
     if (updateFields.length === 0 && profileUpdates.length === 0) {

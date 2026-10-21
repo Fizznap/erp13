@@ -39,3 +39,11 @@ CREATE TABLE IF NOT EXISTS user_auth_identities (
 
 CREATE INDEX IF NOT EXISTS user_auth_identities_user_idx
   ON user_auth_identities (user_id);
+
+-- Canonical B.Tech branches used to classify UST roll-number prefixes.
+-- Existing branch records and academic classes are left untouched.
+INSERT INTO branches (name, code) VALUES
+  ('B.Tech Artificial Intelligence and Machine Learning', 'BTECH-AIML'),
+  ('B.Tech Computer Science and Engineering', 'BTECH-CSE'),
+  ('B.Tech Cyber Security', 'BTECH-CYS')
+ON CONFLICT (code) DO NOTHING;

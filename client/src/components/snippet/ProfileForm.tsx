@@ -25,11 +25,7 @@ export function ProfileForm({
         .filter(Boolean);
     const body = {
       fullName: data.get("fullName"),
-      collegeId: data.get("collegeId"),
-      program: data.get("program"),
-      rollNumber: data.get("rollNumber"),
       yearOfStudy: data.get("yearOfStudy"),
-      admissionYear: data.get("admissionYear"),
       expectedGraduationYear: data.get("expectedGraduationYear"),
       preferredName: data.get("preferredName"),
       phone: data.get("phone"),
@@ -84,11 +80,7 @@ export function ProfileForm({
       <div className="grid gap-3 sm:grid-cols-2">
         {textInput("fullName", "Account name", user?.fullName)}
         {textInput("preferredName", "Name shown in Snippet", profile?.preferredName)}
-        {textInput("collegeId", "College ID / PRN (self-reported)", profile?.collegeId)}
-        {textInput("program", "Program", profile?.program)}
-        {textInput("rollNumber", "Roll number", profile?.rollNumber)}
         {textInput("yearOfStudy", "Study year", profile?.yearOfStudy, "number")}
-        {textInput("admissionYear", "Admission year", profile?.admissionYear, "number")}
         {textInput(
           "expectedGraduationYear",
           "Expected graduation year",
@@ -98,8 +90,11 @@ export function ProfileForm({
         {textInput("phone", "Phone", profile?.phone, "tel")}
       </div>
       <div className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
-        College email: {user?.email || "—"}. Branch/class assignment is managed through your
-        academic record.
+        College email: {user?.email || "—"} · Roll number / PRN:{" "}
+        {profile?.rollNumber || profile?.collegeId || "—"} · Program / branch:{" "}
+        {profile?.program || "B.Tech"} / {profile?.branchName || "—"} · Admission batch:{" "}
+        {profile?.admissionYear || "—"}. These academic identifiers are set during registration;
+        contact an administrator if they need correction.
       </div>
       <label className="flex flex-col gap-1">
         <span className="text-xs font-semibold text-muted-foreground">Bio</span>
