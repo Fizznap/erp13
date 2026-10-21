@@ -208,7 +208,14 @@ function UploadCard({ userId, subjects }: { userId: string, subjects: any[] }) {
     try {
       const fd = new FormData();
       fd.append("file", file);
-      fd.append("subjectOfferingId", offeringId);
+      
+      const selectedSubject = subjects.find(s => (s.offering_id || s.id) === offeringId);
+      if (selectedSubject?.offering_id) {
+        fd.append("subjectOfferingId", selectedSubject.offering_id);
+      } else {
+        fd.append("subjectId", offeringId);
+      }
+      
       fd.append("kind", kind);
 
       const res = await api<{ resource: { id: string } }>('/resources/upload', {
@@ -245,14 +252,18 @@ function UploadCard({ userId, subjects }: { userId: string, subjects: any[] }) {
         </div>
       ) : (
         <>
-          <select required value={offeringId} onChange={(e) => setOfferingId(e.target.value)} disabled={busy} className={input}>
-            <option value="">Choose subject</option>
+          <select required value={offeringId} onChange={(e) => setOfferingId(e.target.value)} disabled={busy || subjects.length === 0} className={input}>
+            {subjects.length === 0 ? (
+              <option value="">No subjects available</option>
+            ) : (
+              <option value="">Choose subject</option>
+            )}
             {subjects.map((s) => <option key={s.offering_id || s.id} value={s.offering_id || s.id}>{s.code} · {s.name}</option>)}
           </select>
           <div className="flex gap-2 overflow-x-auto [scrollbar-width:none]">
             {KINDS.map((k) => <button type="button" disabled={busy} key={k} onClick={() => setKind(k)} className={`press shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium disabled:opacity-50 ${kind === k ? "bg-foreground text-background" : "border border-border bg-card"}`}>{k}</button>)}
           </div>
-          <input ref={fileRef} disabled={busy} required accept="application/pdf" type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-sm file:mr-3 file:rounded-full file:border-0 file:bg-accent file:px-4 file:py-2 file:text-sm file:font-medium disabled:opacity-50" />
+          <input ref={fileRef} disabled={busy || subjects.length === 0} required accept="application/pdf" type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-sm file:mr-3 file:rounded-full file:border-0 file:bg-accent file:px-4 file:py-2 file:text-sm file:font-medium disabled:opacity-50" />
         </>
       )}
 

@@ -42,7 +42,10 @@ describe('E2E Smoke Test - RAG Pipeline', () => {
     
     // Mock subject enrollment check
     pool.query.mockImplementation((query, params) => {
-      if (query.includes('subject_enrollments')) {
+      if (query.includes('SELECT academic_class_id FROM users')) {
+        return Promise.resolve({ rows: [{ academic_class_id: 'test-class-id' }] });
+      }
+      if (query.includes('FROM subject_offerings so')) {
         return Promise.resolve({ rows: [{ name: 'Test Subject' }] });
       }
       if (query.includes('resources WHERE subject_id = $1 AND status = \'ready\'')) {

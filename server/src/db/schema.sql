@@ -49,6 +49,9 @@ CREATE TABLE IF NOT EXISTS users (
     full_name       VARCHAR(255) NOT NULL,
     role            VARCHAR(20) NOT NULL CHECK (role IN ('student', 'faculty', 'admin')),
     is_active       BOOLEAN DEFAULT true,
+    email_verified  BOOLEAN NOT NULL DEFAULT false,
+    email_verification_token_hash CHAR(64),
+    email_verification_expires_at TIMESTAMPTZ,
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now()
 );
@@ -201,6 +204,9 @@ CREATE INDEX IF NOT EXISTS idx_ai_audit_logs_subject ON ai_audit_logs(subject_id
 -- MIGRATIONS (Idempotent schema updates for existing tables)
 -- ============================================================
 ALTER TABLE users ADD COLUMN IF NOT EXISTS academic_class_id UUID REFERENCES academic_classes(id);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token_hash CHAR(64);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTAMPTZ;
 ALTER TABLE subjects ALTER COLUMN faculty_id DROP NOT NULL;
 ALTER TABLE resources ADD COLUMN IF NOT EXISTS subject_offering_id UUID REFERENCES subject_offerings(id);
 ALTER TABLE attendance_sessions ADD COLUMN IF NOT EXISTS subject_offering_id UUID REFERENCES subject_offerings(id);

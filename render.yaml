@@ -24,6 +24,8 @@ services:
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
+      - key: NODE_VERSION
+        value: 22.22.0
       - key: NODE_ENV
         value: production
       - key: PORT
@@ -47,6 +49,18 @@ services:
         value: "15m"
       - key: JWT_REFRESH_EXPIRES_IN
         value: "7d"
+      - key: GOOGLE_CLIENT_ID
+        sync: false          # same OAuth web client ID as VITE_GOOGLE_CLIENT_ID in Vercel
+      - key: SMTP_HOST
+        sync: false          # SMTP provider for password-account email verification
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
       - key: CLIENT_URL
         value: "https://client-phi-lake.vercel.app"
       - key: UPLOAD_DIR
