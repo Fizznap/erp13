@@ -23,6 +23,7 @@ describe('Google ID token validation', () => {
         iss: 'https://accounts.google.com',
         aud: process.env.GOOGLE_CLIENT_ID,
         exp: Math.floor(Date.now() / 1000) + 300,
+        sub: 'google-subject',
         email: '  STUDENT@USTU.EDU.IN ',
         email_verified: true,
         hd: 'ustu.edu.in',
@@ -36,10 +37,13 @@ describe('Google ID token validation', () => {
       idToken: 'google-id-token',
       audience: process.env.GOOGLE_CLIENT_ID,
     });
-    expect(identity).toEqual({ email: 'student@ustu.edu.in', fullName: 'Student Name' });
+    expect(identity).toEqual({ email: 'student@ustu.edu.in', fullName: 'Student Name', subject: 'google-subject', picture: null });
   });
 
   test.each([
+    { iss: 'https://evil.example', aud: 'client', exp: Math.floor(Date.now() / 1000) + 300, sub: 's', email: 'student@ustu.edu.in', email_verified: true, hd: 'ustu.edu.in' },
+    { iss: 'https://accounts.google.com', aud: 'wrong-client', exp: Math.floor(Date.now() / 1000) + 300, sub: 's', email: 'student@ustu.edu.in', email_verified: true, hd: 'ustu.edu.in' },
+    { iss: 'https://accounts.google.com', aud: 'snippet-web-client.apps.googleusercontent.com', exp: Math.floor(Date.now() / 1000) - 1, sub: 's', email: 'student@ustu.edu.in', email_verified: true, hd: 'ustu.edu.in' },
     { email: 'student@gmail.com', email_verified: true, hd: 'ustu.edu.in' },
     { email: 'student@ustu.edu.in.evil', email_verified: true, hd: 'ustu.edu.in' },
     { email: 'student@ustu.edu.in', email_verified: false, hd: 'ustu.edu.in' },

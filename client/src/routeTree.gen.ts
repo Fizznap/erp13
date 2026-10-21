@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as CompleteProfileRouteImport } from './routes/complete-profile'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as AuthenticatedAskRouteImport } from './routes/_authenticated/ask'
@@ -31,6 +32,11 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CompleteProfileRoute = CompleteProfileRouteImport.update({
+  id: '/complete-profile',
+  path: '/complete-profile',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
@@ -98,6 +104,7 @@ const AuthenticatedSubjectsSubjectIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/auth': typeof AuthRoute
+  '/complete-profile': typeof CompleteProfileRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/ask': typeof AuthenticatedAskRoute
   '/attendance': typeof AuthenticatedAttendanceRoute
@@ -112,6 +119,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
+  '/complete-profile': typeof CompleteProfileRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/ask': typeof AuthenticatedAskRoute
   '/attendance': typeof AuthenticatedAttendanceRoute
@@ -129,6 +137,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/complete-profile': typeof CompleteProfileRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
   '/_authenticated/ask': typeof AuthenticatedAskRoute
   '/_authenticated/attendance': typeof AuthenticatedAttendanceRoute
@@ -147,6 +156,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/complete-profile'
     | '/admin'
     | '/ask'
     | '/attendance'
@@ -161,6 +171,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/auth'
+    | '/complete-profile'
     | '/admin'
     | '/ask'
     | '/attendance'
@@ -177,6 +188,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_authenticated'
     | '/auth'
+    | '/complete-profile'
     | '/_authenticated/admin'
     | '/_authenticated/ask'
     | '/_authenticated/attendance'
@@ -194,6 +206,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  CompleteProfileRoute: typeof CompleteProfileRoute
   VerifyStudentNoRoute: typeof VerifyStudentNoRoute
 }
 
@@ -211,6 +224,13 @@ declare module '@tanstack/react-router' {
       path: '/auth'
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/complete-profile': {
+      id: '/complete-profile'
+      path: '/complete-profile'
+      fullPath: '/complete-profile'
+      preLoaderRoute: typeof CompleteProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/': {
@@ -334,6 +354,7 @@ const AuthenticatedRouteRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  CompleteProfileRoute: CompleteProfileRoute,
   VerifyStudentNoRoute: VerifyStudentNoRoute,
 }
 export const routeTree = rootRouteImport

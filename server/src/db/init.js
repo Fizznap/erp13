@@ -9,6 +9,13 @@ async function initDatabase() {
     await pool.query(schema);
     console.log('Database schema created successfully.');
 
+    const studentProfilesMigration = fs.readFileSync(
+      path.join(__dirname, 'migration_02_student_profiles.sql'),
+      'utf-8'
+    );
+    await pool.query(studentProfilesMigration);
+    console.log('Student profile schema is up to date.');
+
     // Add subject_offering_id and new tracking columns to resources
     await pool.query(`
       ALTER TABLE resources ADD COLUMN IF NOT EXISTS subject_offering_id UUID REFERENCES subject_offerings(id) ON DELETE CASCADE;

@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { pool } = require('../db/pool');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authenticateForProfile, authenticateOnboarding, isProfileComplete } = require('../middleware/auth');
 const { authLimiter } = require('../middleware/rateLimit');
 const { isCollegeEmail, normalizeEmail } = require('../utils/collegeEmail');
 const { verifyGoogleIdToken, GoogleIdentityConfigurationError } = require('../services/googleIdentity');
@@ -39,6 +39,96 @@ function sanitizeUser(user) {
     academicClassId: user.academic_class_id,
     createdAt: user.created_at,
   };
+}
+
+function createOnboardingToken(user) {
+  return jwt.sign(
+    { id: user.id, purpose: 'onboarding' },
+    process.env.JWT_SECRET,
+    { expiresIn: '30m' }
+  );
+}
+
+async function loadProfile(userId, db = pool) {
+  const result = await db.query(
+    `SELECT u.*, p.google_picture_url, p.preferred_name, p.college_id, p.program, p.roll_number,
+            p.year_of_study, p.admission_year, p.expected_graduation_year, p.phone, p.bio,
+            p.skills, p.interests, p.achievements, p.linkedin_url, p.github_url, p.portfolio_url,
+            p.registration_completed_at,
+            br.name AS branch_name, br.code AS branch_code, ba.start_year AS batch_start_year,
+            ba.end_year AS batch_end_year, d.name AS division_name, s.number AS semester_number
+     FROM users u LEFT JOIN user_profiles p ON p.user_id = u.id
+     LEFT JOIN academic_classes ac ON ac.id = u.academic_class_id
+     LEFT JOIN branches br ON br.id = ac.branch_id
+     LEFT JOIN batches ba ON ba.id = ac.batch_id
+     LEFT JOIN divisions d ON d.id = ac.division_id
+     LEFT JOIN semesters s ON s.id = ac.semester_id
+     WHERE u.id = $1`,
+    [userId]
+  );
+  return result.rows[0];
+}
+
+function profilePayload(user) {
+  return {
+    googlePictureUrl: user.google_picture_url || null,
+    preferredName: user.preferred_name || null,
+    collegeId: user.college_id || null,
+    program: user.program || null,
+    rollNumber: user.roll_number || null,
+    yearOfStudy: user.year_of_study || null,
+    admissionYear: user.admission_year || null,
+    expectedGraduationYear: user.expected_graduation_year || null,
+    phone: user.phone || null,
+    bio: user.bio || null,
+    skills: user.skills || [],
+    interests: user.interests || [],
+    achievements: user.achievements || [],
+    linkedinUrl: user.linkedin_url || null,
+    githubUrl: user.github_url || null,
+    portfolioUrl: user.portfolio_url || null,
+    branchName: user.branch_name || null,
+    branchCode: user.branch_code || null,
+    divisionName: user.division_name || null,
+    semesterNumber: user.semester_number || null,
+    batchStartYear: user.batch_start_year || null,
+    batchEndYear: user.batch_end_year || null,
+  };
+}
+
+function authResult(user) {
+  const safeUser = sanitizeUser(user);
+  const requiresOnboarding = !isProfileComplete(user);
+  if (requiresOnboarding) {
+    return { user: safeUser, accessToken: createOnboardingToken(user), refreshToken: null, requiresOnboarding: true };
+  }
+  return { user: safeUser, ...generateTokens(user), requiresOnboarding: false };
+}
+
+function cleanString(value, max, { required = false } = {}) {
+  if (typeof value !== 'string') return required ? null : '';
+  const cleaned = value.trim();
+  if ((required && !cleaned) || cleaned.length > max) return null;
+  return cleaned;
+}
+
+function cleanList(value, maxCount = 12) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > maxCount) return null;
+  const items = value.map((entry) => typeof entry === 'string' ? entry.trim() : '');
+  if (items.some((entry) => !entry || entry.length > 100)) return null;
+  return [...new Set(items)];
+}
+
+function safeUrl(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || value.length > 500) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // POST /api/auth/register
@@ -179,8 +269,8 @@ router.post('/login', authLimiter, async (req, res) => {
       return res.status(403).json({ error: 'Verify your college email before signing in' });
     }
 
-    const tokens = generateTokens(user);
-    res.json({ user: sanitizeUser(user), ...tokens });
+    const latest = await loadProfile(user.id);
+    res.json(authResult(latest));
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Login failed' });
@@ -196,37 +286,72 @@ router.post('/google', authLimiter, async (req, res) => {
     }
 
     const identity = await verifyGoogleIdToken(credential);
-    const result = await pool.query('SELECT * FROM users WHERE lower(trim(email)) = $1', [identity.email]);
-    let user = result.rows[0];
+    const client = await pool.connect();
+    let user;
+    try {
+      await client.query('BEGIN');
+      const subjectResult = await client.query(
+        `SELECT user_id FROM user_auth_identities WHERE provider = 'google' AND provider_subject = $1 FOR UPDATE`,
+        [identity.subject]
+      );
+      const emailResult = await client.query('SELECT * FROM users WHERE lower(trim(email)) = $1 FOR UPDATE', [identity.email]);
+      user = emailResult.rows[0];
+      const linkedResult = user
+        ? await client.query(`SELECT provider_subject FROM user_auth_identities WHERE user_id = $1 AND provider = 'google' FOR UPDATE`, [user.id])
+        : { rows: [] };
+      if (subjectResult.rows[0] && (!user || subjectResult.rows[0].user_id !== user.id)) {
+        throw Object.assign(new Error('Google identity is already linked to another account'), { status: 403 });
+      }
+      if (linkedResult.rows[0] && linkedResult.rows[0].provider_subject !== identity.subject) {
+        throw Object.assign(new Error('A different Google account is already linked'), { status: 403 });
+      }
+      if (user && !user.is_active) throw Object.assign(new Error('Account is deactivated'), { status: 403 });
 
-    if (user && !user.is_active) {
-      return res.status(403).json({ error: 'Account is deactivated' });
+      if (!user) {
+        const randomPasswordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
+        const created = await client.query(
+          `INSERT INTO users (email, password_hash, full_name, role, email_verified)
+           VALUES ($1, $2, $3, 'student', true) RETURNING *`,
+          [identity.email, randomPasswordHash, identity.fullName]
+        );
+        user = created.rows[0];
+      } else if (!user.email_verified) {
+        const verified = await client.query(
+          `UPDATE users SET email_verified = true, email_verification_token_hash = NULL,
+                            email_verification_expires_at = NULL, updated_at = now()
+           WHERE id = $1 RETURNING *`,
+          [user.id]
+        );
+        user = verified.rows[0];
+      }
+
+      await client.query(
+        `INSERT INTO user_profiles (user_id, google_picture_url) VALUES ($1, $2)
+         ON CONFLICT (user_id) DO UPDATE SET
+           google_picture_url = COALESCE(user_profiles.google_picture_url, EXCLUDED.google_picture_url),
+           updated_at = now()`,
+        [user.id, identity.picture || null]
+      );
+      await client.query(
+        `INSERT INTO user_auth_identities (user_id, provider, provider_subject)
+         VALUES ($1, 'google', $2) ON CONFLICT (user_id, provider) DO NOTHING`,
+        [user.id, identity.subject]
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
 
-    if (!user) {
-      // Keep the existing schema's password_hash requirement without creating a usable password.
-      const randomPasswordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
-      const created = await pool.query(
-        `INSERT INTO users (email, password_hash, full_name, role, email_verified)
-         VALUES ($1, $2, $3, 'student', true) RETURNING *`,
-        [identity.email, randomPasswordHash, identity.fullName]
-      );
-      user = created.rows[0];
-    } else if (!user.email_verified) {
-      const verified = await pool.query(
-        `UPDATE users SET email_verified = true, email_verification_token_hash = NULL,
-                          email_verification_expires_at = NULL, updated_at = now()
-         WHERE id = $1 RETURNING *`,
-        [user.id]
-      );
-      user = verified.rows[0];
-    }
-
-    res.json({ user: sanitizeUser(user), ...generateTokens(user) });
+    const latest = await loadProfile(user.id);
+    res.json(authResult(latest));
   } catch (err) {
     if (err instanceof GoogleIdentityConfigurationError) {
       return res.status(503).json({ error: 'Google sign-in is not configured' });
     }
+    if (err.status) return res.status(err.status).json({ error: err.message });
     // Invalid, expired, wrong-audience, wrong-issuer, and rejected domain claims are auth failures.
     return res.status(401).json({ error: 'Google sign-in could not be verified for this college account' });
   }
@@ -257,6 +382,9 @@ router.post('/refresh', authLimiter, async (req, res) => {
     if (!user.email_verified) {
       return res.status(403).json({ error: 'Verify your college email before signing in' });
     }
+    if (!isProfileComplete(await loadProfile(user.id))) {
+      return res.status(403).json({ error: 'Complete student onboarding before refreshing this session', code: 'PROFILE_INCOMPLETE' });
+    }
     const tokens = generateTokens(user);
     res.json({ ...tokens });
   } catch (err) {
@@ -265,34 +393,129 @@ router.post('/refresh', authLimiter, async (req, res) => {
 });
 
 // GET /api/auth/me
-router.get('/me', authenticate, async (req, res) => {
+router.get('/me', authenticateForProfile, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
-    if (result.rows.length === 0) {
+    const user = await loadProfile(req.user.id);
+    if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    res.json({ user: sanitizeUser(result.rows[0]) });
+    const requiresOnboarding = !isProfileComplete(user);
+    res.json({ user: { ...sanitizeUser(user), profile: profilePayload(user), profileComplete: !requiresOnboarding }, requiresOnboarding });
   } catch (err) {
     console.error('Me error:', err);
     res.status(500).json({ error: 'Failed to fetch user' });
   }
 });
 
+// Onboarding data is available only to an incomplete account holding its short-lived restricted token.
+router.get('/onboarding/options', authenticateOnboarding, async (_req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT ac.id, br.name AS branch_name, br.code AS branch_code,
+             ba.start_year, ba.end_year, d.name AS division_name, s.number AS semester_number
+      FROM academic_classes ac
+      JOIN branches br ON br.id = ac.branch_id
+      JOIN batches ba ON ba.id = ac.batch_id
+      JOIN divisions d ON d.id = ac.division_id
+      JOIN semesters s ON s.id = ac.semester_id
+      ORDER BY br.name, ba.start_year DESC, d.name, s.number
+    `);
+    res.json({ classes: result.rows });
+  } catch (err) {
+    console.error('Onboarding options error:', err);
+    res.status(500).json({ error: 'Could not load configured academic classes' });
+  }
+});
+
+router.post('/complete-profile', authenticateOnboarding, async (req, res) => {
+  const body = req.body || {};
+  const collegeId = cleanString(body.collegeId, 40, { required: true });
+  const program = cleanString(body.program, 160, { required: true });
+  const rollNumber = cleanString(body.rollNumber, 40, { required: true });
+  const yearOfStudy = Number(body.yearOfStudy);
+  const admissionYear = Number(body.admissionYear);
+  const expectedGraduationYear = Number(body.expectedGraduationYear);
+  const academicClassId = cleanString(body.academicClassId, 64, { required: true });
+  const preferredName = cleanString(body.preferredName || '', 80);
+  const phone = cleanString(body.phone || '', 32);
+  const bio = cleanString(body.bio || '', 500);
+  const skills = cleanList(body.skills);
+  const interests = cleanList(body.interests);
+  const achievements = cleanList(body.achievements);
+  const linkedinUrl = safeUrl(body.linkedinUrl);
+  const githubUrl = safeUrl(body.githubUrl);
+  const portfolioUrl = safeUrl(body.portfolioUrl);
+  const optionalTextInvalid = [preferredName, phone, bio].includes(null);
+  if (!collegeId || !program || !rollNumber || !academicClassId || optionalTextInvalid ||
+      !Number.isInteger(yearOfStudy) || yearOfStudy < 1 || yearOfStudy > 10 ||
+      !Number.isInteger(admissionYear) || admissionYear < 2000 || admissionYear > new Date().getFullYear() + 1 ||
+      !Number.isInteger(expectedGraduationYear) || expectedGraduationYear < admissionYear || expectedGraduationYear > admissionYear + 12 ||
+      !skills || !interests || !achievements ||
+      linkedinUrl === undefined || githubUrl === undefined || portfolioUrl === undefined) {
+    return res.status(400).json({ error: 'Check the required profile fields and optional details' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const classResult = await client.query('SELECT id FROM academic_classes WHERE id = $1', [academicClassId]);
+    if (!classResult.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Select an academic class from the configured options' });
+    }
+    await client.query(
+      `INSERT INTO user_profiles
+       (user_id, preferred_name, college_id, program, roll_number, year_of_study, admission_year,
+        expected_graduation_year, phone, bio, skills, interests, achievements, linkedin_url, github_url,
+        portfolio_url, registration_completed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,now())
+       ON CONFLICT (user_id) DO UPDATE SET
+         preferred_name=EXCLUDED.preferred_name, college_id=EXCLUDED.college_id, program=EXCLUDED.program,
+         roll_number=EXCLUDED.roll_number, year_of_study=EXCLUDED.year_of_study,
+         admission_year=EXCLUDED.admission_year, expected_graduation_year=EXCLUDED.expected_graduation_year,
+         phone=EXCLUDED.phone, bio=EXCLUDED.bio, skills=EXCLUDED.skills, interests=EXCLUDED.interests,
+         achievements=EXCLUDED.achievements, linkedin_url=EXCLUDED.linkedin_url,
+         github_url=EXCLUDED.github_url, portfolio_url=EXCLUDED.portfolio_url,
+         registration_completed_at=COALESCE(user_profiles.registration_completed_at, now()), updated_at=now()`,
+      [req.user.id, preferredName || null, collegeId, program, rollNumber, yearOfStudy, admissionYear,
+        expectedGraduationYear, phone || null, bio || null, skills, interests, achievements,
+        linkedinUrl, githubUrl, portfolioUrl]
+    );
+    await client.query(
+      'UPDATE users SET academic_class_id = $1, full_name = COALESCE(NULLIF($2, \'\'), full_name), updated_at = now() WHERE id = $3',
+      [academicClassId, preferredName || null, req.user.id]
+    );
+    await client.query('COMMIT');
+    const user = await loadProfile(req.user.id);
+    if (!isProfileComplete(user)) return res.status(500).json({ error: 'Profile could not be completed' });
+    res.json({ user: { ...sanitizeUser(user), profile: profilePayload(user), profileComplete: true }, ...generateTokens(user), requiresOnboarding: false });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err.code === '23505') return res.status(409).json({ error: 'That college ID is already registered' });
+    console.error('Complete profile error:', err);
+    res.status(500).json({ error: 'Could not save your profile' });
+  } finally {
+    client.release();
+  }
+});
+
 // PATCH /api/auth/me
 router.patch('/me', authenticate, async (req, res) => {
   try {
-    const { fullName, password } = req.body;
+    const { fullName, password } = req.body || {};
     let updateFields = [];
     let params = [];
     let paramCount = 1;
 
-    if (fullName) {
+    if (fullName !== undefined) {
+      const safeName = cleanString(fullName, 255, { required: true });
+      if (!safeName) return res.status(400).json({ error: 'Full name must be between 1 and 255 characters' });
       updateFields.push(`full_name = $${paramCount++}`);
-      params.push(fullName);
+      params.push(safeName);
     }
 
-    if (password) {
-      if (password.length < 6) {
+    if (password !== undefined && password !== '') {
+      if (typeof password !== 'string' || password.length < 6) {
         return res.status(400).json({ error: 'Password must be at least 6 characters' });
       }
       const passwordHash = await bcrypt.hash(password, 12);
@@ -300,18 +523,69 @@ router.patch('/me', authenticate, async (req, res) => {
       params.push(passwordHash);
     }
 
-    if (updateFields.length === 0) {
+    const fields = {
+      preferredName: ['preferred_name', (value) => cleanString(value, 80)],
+      collegeId: ['college_id', (value) => cleanString(value, 40, { required: true })],
+      program: ['program', (value) => cleanString(value, 160, { required: true })],
+      rollNumber: ['roll_number', (value) => cleanString(value, 40, { required: true })],
+      yearOfStudy: ['year_of_study', (value) => Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 10 ? Number(value) : undefined],
+      admissionYear: ['admission_year', (value) => Number.isInteger(Number(value)) && Number(value) >= 2000 && Number(value) <= new Date().getFullYear() + 1 ? Number(value) : undefined],
+      expectedGraduationYear: ['expected_graduation_year', (value) => Number.isInteger(Number(value)) && Number(value) >= 2000 && Number(value) <= new Date().getFullYear() + 13 ? Number(value) : undefined],
+      phone: ['phone', (value) => cleanString(value, 32)],
+      bio: ['bio', (value) => cleanString(value, 500)],
+      skills: ['skills', (value) => cleanList(value)],
+      interests: ['interests', (value) => cleanList(value)],
+      achievements: ['achievements', (value) => cleanList(value)],
+      linkedinUrl: ['linkedin_url', safeUrl],
+      githubUrl: ['github_url', safeUrl],
+      portfolioUrl: ['portfolio_url', safeUrl],
+    };
+    const profileUpdates = [];
+    const profileValues = [];
+    for (const [key, [column, clean]] of Object.entries(fields)) {
+      if (req.body?.[key] === undefined) continue;
+      const value = clean(req.body[key]);
+      if (value === null || value === undefined) return res.status(400).json({ error: `Invalid ${key}` });
+      profileUpdates.push(column);
+      profileValues.push(value === '' ? null : value);
+    }
+
+    if (req.body?.email !== undefined || req.body?.role !== undefined || req.body?.academicClassId !== undefined) {
+      return res.status(400).json({ error: 'Email, role, and class assignment cannot be changed here' });
+    }
+
+    if (updateFields.length === 0 && profileUpdates.length === 0) {
       return res.status(400).json({ error: 'Nothing to update' });
     }
 
-    params.push(req.user.id);
-    const result = await pool.query(
-      `UPDATE users SET ${updateFields.join(', ')}, updated_at = now() WHERE id = $${paramCount} RETURNING *`,
-      params
-    );
-
-    res.json({ user: sanitizeUser(result.rows[0]) });
+    if (updateFields.length) {
+      params.push(req.user.id);
+      await pool.query(
+        `UPDATE users SET ${updateFields.join(', ')}, updated_at = now() WHERE id = $${paramCount}`,
+        params
+      );
+    }
+    if (req.body?.preferredName !== undefined && req.body?.fullName === undefined) {
+      const displayName = cleanString(req.body.preferredName, 80);
+      if (displayName === null) return res.status(400).json({ error: 'Invalid preferredName' });
+      await pool.query(
+        'UPDATE users SET full_name = COALESCE(NULLIF($1, \'\'), full_name), updated_at = now() WHERE id = $2',
+        [displayName, req.user.id]
+      );
+    }
+    if (profileUpdates.length) {
+      const values = profileValues.map((_, index) => `$${index + 2}`).join(', ');
+      const setters = profileUpdates.map((column, index) => `${column} = EXCLUDED.${column}`).join(', ');
+      await pool.query(
+        `INSERT INTO user_profiles (user_id, ${profileUpdates.join(', ')}) VALUES ($1, ${values})
+         ON CONFLICT (user_id) DO UPDATE SET ${setters}, updated_at = now()`,
+        [req.user.id, ...profileValues]
+      );
+    }
+    const user = await loadProfile(req.user.id);
+    res.json({ user: { ...sanitizeUser(user), profile: profilePayload(user), profileComplete: isProfileComplete(user) } });
   } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'That college ID is already registered' });
     console.error('Update me error:', err);
     res.status(500).json({ error: 'Failed to update user' });
   }
