@@ -79,9 +79,9 @@ INSERT INTO semesters (number)
 SELECT generate_series(1, 8)
 ON CONFLICT (number) DO NOTHING;
 
--- The supplied roster identifies the 2024–28 CSE B division. Seed its lecture
--- classes and B1/B2 lab groups; other branch/division combinations stay admin-configurable.
-INSERT INTO divisions (name) VALUES ('B') ON CONFLICT (name) DO NOTHING;
+-- Preconfigure the 2024–28 cohort for each roll-number branch. Divisions are
+-- shared labels, while the branch + batch + division combination identifies a class.
+INSERT INTO divisions (name) VALUES ('A'), ('B'), ('C') ON CONFLICT (name) DO NOTHING;
 
 INSERT INTO academic_classes (branch_id, batch_id, division_id, semester_id)
 SELECT br.id, ba.id, d.id, s.id
@@ -89,8 +89,9 @@ FROM branches br
 CROSS JOIN batches ba
 CROSS JOIN divisions d
 CROSS JOIN semesters s
-WHERE br.code = 'BTECH-CSE' AND ba.start_year = 2024 AND ba.end_year = 2028
-  AND d.name = 'B' AND s.number BETWEEN 1 AND 8
+WHERE br.code IN ('BTECH-AIML', 'BTECH-CSE', 'BTECH-CYS')
+  AND ba.start_year = 2024 AND ba.end_year = 2028
+  AND d.name IN ('A', 'B', 'C') AND s.number BETWEEN 1 AND 8
 ON CONFLICT (branch_id, batch_id, division_id, semester_id) DO NOTHING;
 
 INSERT INTO academic_lab_groups (branch_id, batch_id, division_id, name)
@@ -98,6 +99,7 @@ SELECT br.id, ba.id, d.id, lab_names.name
 FROM branches br
 CROSS JOIN batches ba
 CROSS JOIN divisions d
-CROSS JOIN (VALUES ('B1'), ('B2')) AS lab_names(name)
-WHERE br.code = 'BTECH-CSE' AND ba.start_year = 2024 AND ba.end_year = 2028 AND d.name = 'B'
+CROSS JOIN LATERAL (VALUES (d.name || '1'), (d.name || '2')) AS lab_names(name)
+WHERE br.code IN ('BTECH-AIML', 'BTECH-CSE', 'BTECH-CYS')
+  AND ba.start_year = 2024 AND ba.end_year = 2028 AND d.name IN ('A', 'B', 'C')
 ON CONFLICT (branch_id, batch_id, division_id, name) DO NOTHING;

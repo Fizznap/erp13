@@ -75,4 +75,53 @@ describe('division and lab-group attendance scopes', () => {
     expect(response.status).toBe(400);
     expect(pool.query).not.toHaveBeenCalled();
   });
+
+  test('faculty can view a division roster with absent students included', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{
+      id: 'session-1', faculty_id: 'test-user', subject_offering_id: 'offering-1',
+      branch_id: 'branch-1', batch_id: 'batch-1', division_id: 'division-1', academic_lab_group_id: null,
+    }] }).mockResolvedValueOnce({ rows: [
+      { student_id: 'student-1', full_name: 'Present Student', status: 'present' },
+      { student_id: 'student-2', full_name: 'Absent Student', status: 'absent' },
+    ] });
+
+    const response = await request(app).get('/api/attendance/session-1/roster');
+
+    expect(response.status).toBe(200);
+    expect(response.body.students.map((student) => student.status)).toEqual(['present', 'absent']);
+    expect(pool.query.mock.calls[1][0]).toContain('LEFT JOIN attendance_records');
+    expect(pool.query.mock.calls[1][1]).toEqual(['session-1', 'branch-1', 'batch-1', 'division-1', null]);
+  });
+
+  test('faculty cannot see or edit a session owned by another faculty member', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{
+      id: 'session-1', faculty_id: 'another-faculty', subject_offering_id: 'offering-1',
+      branch_id: 'branch-1', batch_id: 'batch-1', division_id: 'division-1', academic_lab_group_id: null,
+    }] });
+
+    const response = await request(app).get('/api/attendance/session-1/roster');
+
+    expect(response.status).toBe(403);
+    expect(pool.query).toHaveBeenCalledTimes(1);
+  });
+
+  test('faculty can correct attendance for a student in the session class', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{
+      id: 'session-1', faculty_id: 'test-user', subject_offering_id: 'offering-1',
+      branch_id: 'branch-1', batch_id: 'batch-1', division_id: 'division-1', academic_lab_group_id: null,
+    }] }).mockResolvedValueOnce({ rows: [{ id: 'student-1' }] })
+      .mockResolvedValueOnce({ rows: [{ student_id: 'student-1', status: 'present' }] });
+
+    const response = await request(app).put('/api/attendance/session-1/roster/student-1').send({ status: 'present' });
+
+    expect(response.status).toBe(200);
+    expect(pool.query.mock.calls[1][1]).toEqual(['student-1', 'branch-1', 'batch-1', 'division-1', null]);
+    expect(pool.query.mock.calls[2][0]).toContain("verification_method = 'faculty_manual'");
+  });
+
+  test('manual attendance rejects unsupported statuses', async () => {
+    const response = await request(app).put('/api/attendance/session-1/roster/student-1').send({ status: 'admin' });
+    expect(response.status).toBe(400);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
 });

@@ -279,7 +279,8 @@ describe('college-domain authentication', () => {
     pool.query.mockResolvedValueOnce({ rows: [incomplete] });
     const response = await request(app).post('/api/auth/complete-profile').set('Authorization', `Bearer ${token}`).send({
       rollNumber: 'UST24R0102085', yearOfStudy: 3,
-      expectedGraduationYear: 2028, academicClassId: 'invented-class', academicLabGroupId: 'lab-group', userId: 'another-user',
+      expectedGraduationYear: 2028, academicClassId: 'invented-class', academicBranchId: 'branch-id',
+      academicDivisionId: 'division-id', academicLabGroupId: 'lab-group', userId: 'another-user',
     });
     expect(response.status).toBe(400);
     expect(response.body.accessToken).toBeUndefined();
@@ -292,6 +293,7 @@ describe('college-domain authentication', () => {
     pool.query.mockResolvedValueOnce({ rows: [incomplete] });
     const response = await request(app).post('/api/auth/complete-profile').set('Authorization', `Bearer ${token}`).send({
       rollNumber: 'UST24L0102085', yearOfStudy: 3, expectedGraduationYear: 2028, academicClassId: 'class-id',
+      academicBranchId: 'branch-id', academicDivisionId: 'division-id', academicLabGroupId: 'lab-group',
     });
     expect(response.status).toBe(400);
     expect(response.body.accessToken).toBeUndefined();
@@ -303,9 +305,10 @@ describe('college-domain authentication', () => {
     const token = jwt.sign({ id: incomplete.id, purpose: 'onboarding' }, process.env.JWT_SECRET, { expiresIn: '30m' });
     pool.query.mockResolvedValueOnce({ rows: [incomplete] });
     pool.__client.query.mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ id: 'class-id', branch_code: 'BTECH-AIML', start_year: 2024 }] });
+      .mockResolvedValueOnce({ rows: [{ id: 'class-id', branch_code: 'BTECH-AIML', start_year: 2024, branch_id: 'branch-id', division_id: 'division-id' }] });
     const response = await request(app).post('/api/auth/complete-profile').set('Authorization', `Bearer ${token}`).send({
-      rollNumber: 'UST24R0102085', yearOfStudy: 3, expectedGraduationYear: 2028, academicClassId: 'class-id', academicLabGroupId: 'lab-group',
+      rollNumber: 'UST24R0102085', yearOfStudy: 3, expectedGraduationYear: 2028, academicClassId: 'class-id',
+      academicBranchId: 'branch-id', academicDivisionId: 'division-id', academicLabGroupId: 'lab-group',
     });
     expect(response.status).toBe(400);
     expect(response.body.accessToken).toBeUndefined();
@@ -331,7 +334,8 @@ describe('college-domain authentication', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         rollNumber: ' ust24r0102085 ', yearOfStudy: 3, expectedGraduationYear: 2028,
-        academicClassId: 'class-id', academicLabGroupId: 'lab-group', collegeId: 'ATTACKER-ID', program: 'Admin', admissionYear: 2001,
+        academicClassId: 'class-id', academicBranchId: 'branch-id', academicDivisionId: 'division-id',
+        academicLabGroupId: 'lab-group', collegeId: 'ATTACKER-ID', program: 'Admin', admissionYear: 2001,
       });
 
     expect(response.status).toBe(200);
@@ -365,6 +369,35 @@ describe('college-domain authentication', () => {
     expect(response.status).toBe(200);
     expect(pool.query.mock.calls[1][1]).toEqual(['Updated Name', 'college-user-id']);
     expect(JSON.stringify(pool.query.mock.calls[1])).not.toContain('some-other-user');
+  });
+
+  test('profile photo upload validates image bytes and stores the file against the signed-in user', async () => {
+    const accessToken = jwt.sign({ id: 'college-user-id' }, process.env.JWT_SECRET);
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x01]);
+    pool.query.mockResolvedValueOnce({ rows: [makeUser()] }).mockResolvedValueOnce({ rows: [] });
+
+    const response = await request(app)
+      .put('/api/auth/avatar')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .attach('file', jpeg, { filename: 'profile.jpg', contentType: 'image/jpeg' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.hasUploadedPhoto).toBe(true);
+    expect(pool.query.mock.calls[1][0]).toContain('INSERT INTO user_avatars');
+    expect(pool.query.mock.calls[1][1]).toEqual(['college-user-id', 'image/jpeg', jpeg]);
+  });
+
+  test('profile photo upload rejects a spoofed image extension without storing it', async () => {
+    const accessToken = jwt.sign({ id: 'college-user-id' }, process.env.JWT_SECRET);
+    pool.query.mockResolvedValueOnce({ rows: [makeUser()] });
+
+    const response = await request(app)
+      .put('/api/auth/avatar')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .attach('file', Buffer.from('not an image'), { filename: 'profile.jpg', contentType: 'image/jpeg' });
+
+    expect(response.status).toBe(415);
+    expect(pool.query).toHaveBeenCalledTimes(1);
   });
 
   test('protected endpoints do not accept access tokens in query strings', async () => {

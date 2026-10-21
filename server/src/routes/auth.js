@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const multer = require('multer');
 const { pool } = require('../db/pool');
 const { authenticate, authenticateForProfile, authenticateOnboarding, isProfileComplete } = require('../middleware/auth');
 const { authLimiter } = require('../middleware/rateLimit');
@@ -15,6 +16,10 @@ const {
 } = require('../services/emailVerification');
 
 const router = express.Router();
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+});
 
 function generateTokens(user) {
   const accessToken = jwt.sign(
@@ -56,6 +61,8 @@ async function loadProfile(userId, db = pool) {
             p.year_of_study, p.admission_year, p.expected_graduation_year, p.phone, p.bio,
             p.skills, p.interests, p.achievements, p.linkedin_url, p.github_url, p.portfolio_url,
             p.registration_completed_at, p.academic_lab_group_id,
+            EXISTS (SELECT 1 FROM user_avatars ua WHERE ua.user_id = u.id) AS has_uploaded_photo,
+            (SELECT ua.updated_at FROM user_avatars ua WHERE ua.user_id = u.id) AS uploaded_photo_updated_at,
             br.name AS branch_name, br.code AS branch_code, ba.start_year AS batch_start_year,
             ba.end_year AS batch_end_year, d.name AS division_name, s.number AS semester_number,
             lg.name AS lab_group_name
@@ -75,6 +82,8 @@ async function loadProfile(userId, db = pool) {
 function profilePayload(user) {
   return {
     googlePictureUrl: user.google_picture_url || null,
+    hasUploadedPhoto: Boolean(user.has_uploaded_photo),
+    avatarUpdatedAt: user.uploaded_photo_updated_at || null,
     preferredName: user.preferred_name || null,
     collegeId: user.college_id || null,
     program: user.program || null,
@@ -412,6 +421,71 @@ router.get('/me', authenticateForProfile, async (req, res) => {
   }
 });
 
+function detectAvatarType(buffer) {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
+  if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  return null;
+}
+
+function receiveAvatar(req, res, next) {
+  avatarUpload.single('file')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({
+        error: err.code === 'LIMIT_FILE_SIZE' ? 'Profile photo must be 2 MB or smaller' : 'Choose one profile photo',
+      });
+    }
+    if (err) return res.status(400).json({ error: 'Could not read profile photo' });
+    next();
+  });
+}
+
+// GET /api/auth/avatar — private image bytes; the browser sends the normal API bearer token.
+router.get('/avatar', authenticateForProfile, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT content_type, image_data FROM user_avatars WHERE user_id = $1',
+      [req.user.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'No uploaded profile photo' });
+    res.set('Cache-Control', 'private, no-store');
+    res.type(result.rows[0].content_type).send(result.rows[0].image_data);
+  } catch (err) {
+    console.error('Profile photo read error:', err);
+    res.status(500).json({ error: 'Could not load profile photo' });
+  }
+});
+
+// PUT /api/auth/avatar — photos are stored in Postgres, not Render's ephemeral filesystem.
+router.put('/avatar', authenticateForProfile, authLimiter, receiveAvatar, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Choose a JPEG, PNG, or WebP profile photo' });
+  const contentType = detectAvatarType(req.file.buffer);
+  if (!contentType) return res.status(415).json({ error: 'Use a valid JPEG, PNG, or WebP image' });
+  try {
+    await pool.query(
+      `INSERT INTO user_avatars (user_id, content_type, image_data, updated_at)
+       VALUES ($1, $2, $3, now())
+       ON CONFLICT (user_id) DO UPDATE
+       SET content_type = EXCLUDED.content_type, image_data = EXCLUDED.image_data, updated_at = now()`,
+      [req.user.id, contentType, req.file.buffer]
+    );
+    res.json({ success: true, hasUploadedPhoto: true });
+  } catch (err) {
+    console.error('Profile photo upload error:', err);
+    res.status(500).json({ error: 'Could not save profile photo' });
+  }
+});
+
+router.delete('/avatar', authenticateForProfile, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM user_avatars WHERE user_id = $1', [req.user.id]);
+    res.json({ success: true, hasUploadedPhoto: false });
+  } catch (err) {
+    console.error('Profile photo removal error:', err);
+    res.status(500).json({ error: 'Could not remove profile photo' });
+  }
+});
+
 // Onboarding data is available only to an incomplete account holding its short-lived restricted token.
 router.get('/onboarding/options', authenticateOnboarding, async (_req, res) => {
   try {
@@ -451,6 +525,9 @@ router.post('/complete-profile', authenticateOnboarding, async (req, res) => {
   const admissionYear = roll?.admissionYear;
   const expectedGraduationYear = Number(body.expectedGraduationYear);
   const academicClassId = cleanString(body.academicClassId, 64, { required: true });
+  const hasBranchSelection = body.academicBranchId !== undefined || body.academicDivisionId !== undefined;
+  const academicBranchId = hasBranchSelection ? cleanString(body.academicBranchId, 64, { required: true }) : null;
+  const academicDivisionId = hasBranchSelection ? cleanString(body.academicDivisionId, 64, { required: true }) : null;
   const academicLabGroupId = cleanString(body.academicLabGroupId, 64, { required: true });
   const preferredName = cleanString(body.preferredName || '', 80);
   const phone = cleanString(body.phone || '', 32);
@@ -462,7 +539,8 @@ router.post('/complete-profile', authenticateOnboarding, async (req, res) => {
   const githubUrl = safeUrl(body.githubUrl);
   const portfolioUrl = safeUrl(body.portfolioUrl);
   const optionalTextInvalid = [preferredName, phone, bio].includes(null);
-  if (!collegeId || !program || !rollNumber || !academicClassId || !academicLabGroupId || optionalTextInvalid ||
+  if (!collegeId || !program || !rollNumber || !academicClassId ||
+      (hasBranchSelection && (!academicBranchId || !academicDivisionId)) || !academicLabGroupId || optionalTextInvalid ||
       !Number.isInteger(yearOfStudy) || yearOfStudy < 1 || yearOfStudy > 4 ||
       !Number.isInteger(admissionYear) || admissionYear < 2000 || admissionYear > new Date().getFullYear() + 1 ||
       !Number.isInteger(expectedGraduationYear) || expectedGraduationYear < admissionYear + yearOfStudy - 1 || expectedGraduationYear > admissionYear + 8 ||
@@ -481,8 +559,9 @@ router.post('/complete-profile', authenticateOnboarding, async (req, res) => {
        JOIN branches br ON br.id = ac.branch_id
        JOIN batches ba ON ba.id = ac.batch_id
        JOIN semesters s ON s.id = ac.semester_id
-       WHERE ac.id = $1`,
-      [academicClassId]
+       WHERE ac.id = $1 AND ($2::uuid IS NULL OR ac.branch_id = $2)
+         AND ($3::uuid IS NULL OR ac.division_id = $3)`,
+      [academicClassId, academicBranchId, academicDivisionId]
     );
     const selectedClass = classResult.rows[0];
     const firstSemesterOfYear = (yearOfStudy - 1) * 2 + 1;

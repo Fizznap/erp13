@@ -6,6 +6,38 @@ const { haversineDistance } = require('../utils/geo');
 
 const router = express.Router();
 
+async function loadSessionScope(sessionId) {
+  const result = await pool.query(
+    `SELECT a.id, a.faculty_id, a.academic_lab_group_id, a.subject_offering_id,
+            ac.branch_id, ac.batch_id, ac.division_id
+     FROM attendance_sessions a
+     LEFT JOIN subject_offerings so ON so.id = a.subject_offering_id
+     LEFT JOIN academic_classes ac ON ac.id = so.academic_class_id
+     WHERE a.id = $1`,
+    [sessionId]
+  );
+  return result.rows[0];
+}
+
+function canManageSession(session, user) {
+  return user.role === 'admin' || session.faculty_id === user.id;
+}
+
+async function isSessionRosterStudent(session, studentId) {
+  const result = await pool.query(
+    `SELECT u.id
+     FROM users u
+     JOIN academic_classes student_class ON student_class.id = u.academic_class_id
+     LEFT JOIN user_profiles p ON p.user_id = u.id
+     WHERE u.id = $1 AND u.role = 'student' AND u.is_active = true AND u.email_verified = true
+       AND student_class.branch_id = $2 AND student_class.batch_id = $3
+       AND student_class.division_id = $4
+       AND ($5::uuid IS NULL OR p.academic_lab_group_id = $5)`,
+    [studentId, session.branch_id, session.batch_id, session.division_id, session.academic_lab_group_id]
+  );
+  return result.rows.length > 0;
+}
+
 function generateNonce() {
   return crypto.randomBytes(3).toString('hex').toUpperCase(); // 6-char hex
 }
@@ -170,7 +202,11 @@ router.post('/mark', authenticate, authorize('student'), async (req, res) => {
 
     // Verify student is enrolled in this offering
     const userRec = await pool.query(
-      'SELECT u.academic_class_id, p.academic_lab_group_id FROM users u LEFT JOIN user_profiles p ON p.user_id = u.id WHERE u.id = $1',
+      `SELECT u.academic_class_id, p.academic_lab_group_id,
+              student_class.branch_id, student_class.batch_id, student_class.division_id
+       FROM users u LEFT JOIN user_profiles p ON p.user_id = u.id
+       LEFT JOIN academic_classes student_class ON student_class.id = u.academic_class_id
+       WHERE u.id = $1`,
       [req.user.id]
     );
     const classId = userRec.rows[0]?.academic_class_id;
@@ -181,12 +217,24 @@ router.post('/mark', authenticate, authorize('student'), async (req, res) => {
     }
 
     if (session.subject_offering_id) {
-      const offering = await pool.query('SELECT id FROM subject_offerings WHERE id = $1 AND academic_class_id = $2', [session.subject_offering_id, classId]);
+      const offering = await pool.query(
+        `SELECT so.id FROM subject_offerings so
+         JOIN academic_classes offered_class ON offered_class.id = so.academic_class_id
+         WHERE so.id = $1 AND offered_class.branch_id = $2
+           AND offered_class.batch_id = $3 AND offered_class.division_id = $4`,
+        [session.subject_offering_id, userRec.rows[0].branch_id, userRec.rows[0].batch_id, userRec.rows[0].division_id]
+      );
       if (offering.rows.length === 0) {
         return res.status(403).json({ error: 'You are not enrolled in this offering' });
       }
     } else {
-      const offering = await pool.query('SELECT id FROM subject_offerings WHERE subject_id = $1 AND academic_class_id = $2', [session.subject_id, classId]);
+      const offering = await pool.query(
+        `SELECT so.id FROM subject_offerings so
+         JOIN academic_classes offered_class ON offered_class.id = so.academic_class_id
+         WHERE so.subject_id = $1 AND offered_class.branch_id = $2
+           AND offered_class.batch_id = $3 AND offered_class.division_id = $4`,
+        [session.subject_id, userRec.rows[0].branch_id, userRec.rows[0].batch_id, userRec.rows[0].division_id]
+      );
       if (offering.rows.length === 0) {
         // Fallback to old enrollment if offering doesn't exist
         const oldEnr = await pool.query('SELECT id FROM subject_enrollments WHERE student_id = $1 AND subject_id = $2', [req.user.id, session.subject_id]);
@@ -284,35 +332,96 @@ router.post('/:sessionId/end', authenticate, authorize('faculty'), async (req, r
 router.post('/:sessionId/override', authenticate, authorize('admin', 'faculty'), async (req, res) => {
   try {
     const { studentId, status, note } = req.body;
-    if (!studentId || !status || !note) {
-      return res.status(400).json({ error: 'studentId, status, and note are required' });
+    if (!studentId || !['present', 'absent'].includes(status) || typeof note !== 'string' || !note.trim() || note.length > 255) {
+      return res.status(400).json({ error: 'studentId, present/absent status, and a note are required' });
     }
-    
-    // Check if record exists
-    const existing = await pool.query(
-      'SELECT id FROM attendance_records WHERE session_id = $1 AND student_id = $2',
-      [req.params.sessionId, studentId]
+    const session = await loadSessionScope(req.params.sessionId);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    if (!canManageSession(session, req.user)) return res.status(403).json({ error: 'You do not own this attendance session' });
+    if (!session.subject_offering_id || !session.branch_id || !session.batch_id || !session.division_id) {
+      return res.status(400).json({ error: 'This session is not linked to a configured class roster' });
+    }
+    if (!await isSessionRosterStudent(session, studentId)) {
+      return res.status(403).json({ error: 'Student is not enrolled in this division or lab group' });
+    }
+    await pool.query(
+      `INSERT INTO attendance_records
+       (session_id, student_id, latitude, longitude, distance_meters, status, rejection_reason, verification_method)
+       VALUES ($1, $2, 0, 0, 0, $3, $4, $5)
+       ON CONFLICT (session_id, student_id) DO UPDATE SET
+         status = EXCLUDED.status, rejection_reason = EXCLUDED.rejection_reason,
+         verification_method = EXCLUDED.verification_method, marked_at = now()`,
+      [req.params.sessionId, studentId, status, `Manual attendance: ${note.trim()}`, req.user.role === 'admin' ? 'admin_override' : 'faculty_manual']
     );
-
-    if (existing.rows.length > 0) {
-      await pool.query(
-        `UPDATE attendance_records 
-         SET status = $1, rejection_reason = $2, verification_method = 'admin_override'
-         WHERE session_id = $3 AND student_id = $4`,
-        [status, `Admin override: ${note}`, req.params.sessionId, studentId]
-      );
-    } else {
-      await pool.query(
-        `INSERT INTO attendance_records (session_id, student_id, latitude, longitude, distance_meters, status, rejection_reason, verification_method)
-         VALUES ($1, $2, 0, 0, 0, $3, $4, 'admin_override')`,
-        [req.params.sessionId, studentId, status, `Admin override: ${note}`]
-      );
-    }
-
-    res.json({ success: true, message: 'Attendance overridden' });
+    res.json({ success: true, message: 'Attendance updated' });
   } catch (err) {
     console.error('Override attendance error:', err);
     res.status(500).json({ error: 'Failed to override attendance' });
+  }
+});
+
+// GET /api/attendance/:sessionId/roster — include present and absent students for the exact class scope.
+router.get('/:sessionId/roster', authenticate, authorize('faculty', 'admin'), async (req, res) => {
+  try {
+    const session = await loadSessionScope(req.params.sessionId);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    if (!canManageSession(session, req.user)) return res.status(403).json({ error: 'You do not own this attendance session' });
+    if (!session.subject_offering_id || !session.branch_id || !session.batch_id || !session.division_id) {
+      return res.status(400).json({ error: 'This session is not linked to a configured class roster' });
+    }
+    const result = await pool.query(
+      `SELECT u.id AS student_id, COALESCE(p.preferred_name, u.full_name) AS full_name,
+              p.roll_number, u.email,
+              COALESCE(ar.status, 'absent') AS status, ar.marked_at,
+              ar.verification_method, ar.rejection_reason
+       FROM users u
+       JOIN academic_classes student_class ON student_class.id = u.academic_class_id
+       LEFT JOIN user_profiles p ON p.user_id = u.id
+       LEFT JOIN attendance_records ar ON ar.session_id = $1 AND ar.student_id = u.id
+       WHERE u.role = 'student' AND u.is_active = true AND u.email_verified = true
+         AND student_class.branch_id = $2 AND student_class.batch_id = $3
+         AND student_class.division_id = $4
+         AND ($5::uuid IS NULL OR p.academic_lab_group_id = $5)
+       ORDER BY COALESCE(p.roll_number, u.email), u.full_name`,
+      [req.params.sessionId, session.branch_id, session.batch_id, session.division_id, session.academic_lab_group_id]
+    );
+    res.json({ students: result.rows });
+  } catch (err) {
+    console.error('Attendance roster error:', err);
+    res.status(500).json({ error: 'Could not load the class roster' });
+  }
+});
+
+// PUT /api/attendance/:sessionId/roster/:studentId — faculty can correct attendance later.
+router.put('/:sessionId/roster/:studentId', authenticate, authorize('faculty', 'admin'), async (req, res) => {
+  try {
+    const { status, note = '' } = req.body || {};
+    if (!['present', 'absent'].includes(status) || typeof note !== 'string' || note.length > 255) {
+      return res.status(400).json({ error: 'Status must be present or absent and note must be 255 characters or fewer' });
+    }
+    const session = await loadSessionScope(req.params.sessionId);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    if (!canManageSession(session, req.user)) return res.status(403).json({ error: 'You do not own this attendance session' });
+    if (!session.subject_offering_id || !session.branch_id || !session.batch_id || !session.division_id) {
+      return res.status(400).json({ error: 'This session is not linked to a configured class roster' });
+    }
+    if (!await isSessionRosterStudent(session, req.params.studentId)) {
+      return res.status(403).json({ error: 'Student is not enrolled in this division or lab group' });
+    }
+    const result = await pool.query(
+      `INSERT INTO attendance_records
+       (session_id, student_id, latitude, longitude, distance_meters, status, rejection_reason, verification_method)
+       VALUES ($1, $2, 0, 0, 0, $3, $4, 'faculty_manual')
+       ON CONFLICT (session_id, student_id) DO UPDATE SET
+         status = EXCLUDED.status, rejection_reason = EXCLUDED.rejection_reason,
+         verification_method = 'faculty_manual', marked_at = now()
+       RETURNING id, student_id, status, marked_at, verification_method, rejection_reason`,
+      [req.params.sessionId, req.params.studentId, status, note.trim() || null]
+    );
+    res.json({ student: result.rows[0] });
+  } catch (err) {
+    console.error('Manual attendance update error:', err);
+    res.status(500).json({ error: 'Could not update attendance' });
   }
 });
 
@@ -331,9 +440,9 @@ router.get('/sessions', authenticate, authorize('faculty', 'admin'), async (req,
                 (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'present') AS present_count,
                 (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'rejected') AS rejected_count
          FROM attendance_sessions a
-         WHERE a.subject_offering_id = $1
+         WHERE a.subject_offering_id = $1 AND ($2 = 'admin' OR a.faculty_id = $3)
          ORDER BY a.started_at DESC`,
-        [subjectOfferingId]
+        [subjectOfferingId, req.user.role, req.user.id]
       );
     } else {
       result = await pool.query(
@@ -341,9 +450,9 @@ router.get('/sessions', authenticate, authorize('faculty', 'admin'), async (req,
                 (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'present') AS present_count,
                 (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'rejected') AS rejected_count
          FROM attendance_sessions a
-         WHERE a.subject_id = $1
+         WHERE a.subject_id = $1 AND ($2 = 'admin' OR a.faculty_id = $3)
          ORDER BY a.started_at DESC`,
-        [subjectId]
+        [subjectId, req.user.role, req.user.id]
       );
     }
     res.json({ sessions: result.rows });
@@ -385,6 +494,9 @@ router.get('/my/records', authenticate, authorize('student'), async (req, res) =
 // GET /api/attendance/:sessionId/records — list attendance records for a session
 router.get('/:sessionId/records', authenticate, authorize('faculty', 'admin'), async (req, res) => {
   try {
+    const session = await loadSessionScope(req.params.sessionId);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    if (!canManageSession(session, req.user)) return res.status(403).json({ error: 'You do not own this attendance session' });
     const result = await pool.query(
       `SELECT ar.*, u.full_name, u.email
        FROM attendance_records ar
