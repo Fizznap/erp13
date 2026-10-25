@@ -47,7 +47,7 @@ services:
       - uploads:/usr/src/app/uploads
     ports:
       - "3001:3001"
-    command: ["sh", "-c", "npm run start:prod || node src/index.js"]
+    command: ["sh", "-c", "npm run db:init && node src/index.js"]
     restart: unless-stopped
 
   worker:
@@ -71,14 +71,15 @@ services:
     build:
       context: ./client
       dockerfile: Dockerfile
-    env_file:
-      - server/.env
-    volumes:
-      - ./client:/usr/src/app
+    environment:
+      - VITE_API_URL=http://localhost:3001/api
     ports:
       - "3000:3000"
-    command: ["sh", "-c", "npm run dev || npm run start"]
+    command: ["sh", "-c", "npm run start"]
     restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_started
 
 volumes:
   db_data:

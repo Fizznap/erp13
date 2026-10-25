@@ -12,6 +12,7 @@ const { verifyGoogleIdToken, GoogleIdentityConfigurationError } = require('../se
 const {
   makeVerificationToken,
   sendVerificationEmail,
+  sendPasswordResetEmail,
   EmailDeliveryConfigurationError,
 } = require('../services/emailVerification');
 
@@ -251,6 +252,90 @@ router.post('/verification/resend', authLimiter, async (req, res) => {
     return res.status(500).json({ error: 'Could not send a verification link' });
   }
 });
+
+
+// POST /api/auth/forgot-password — request a password reset link
+router.post('/forgot-password', authLimiter, async (req, res) => {
+  const { email: rawEmail } = req.body || {};
+  const email = normalizeEmail(rawEmail);
+
+  if (!email || !isCollegeEmail(email)) {
+    return res.status(403).json({ error: 'Use your @ustu.edu.in college email' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT id, full_name FROM users WHERE lower(trim(email)) = $1 AND is_active = true AND email_verified = true`,
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ message: 'If this college account exists and is verified, a password reset link has been sent.' });
+    }
+
+    const user = result.rows[0];
+    const verification = makeVerificationToken();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+    await pool.query(
+      `UPDATE users SET password_reset_token_hash = $1, password_reset_expires_at = $2, updated_at = now() WHERE id = $3`,
+      [verification.tokenHash, expiresAt, user.id]
+    );
+
+    try {
+      await sendPasswordResetEmail(user.email, user.full_name, verification.token);
+    } catch (err) {
+      if (err instanceof EmailDeliveryConfigurationError) {
+        return res.status(503).json({ error: 'Password reset email is not configured. Try again later.' });
+      }
+      console.error('Send password reset email error:', err);
+      return res.status(500).json({ error: 'Could not send password reset email' });
+    }
+
+    return res.json({ message: 'If this college account exists and is verified, a password reset link has been sent.' });
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    return res.status(500).json({ error: 'Password reset request failed' });
+  }
+});
+
+// POST /api/auth/reset-password — confirm password reset with a token
+router.post('/reset-password', authLimiter, async (req, res) => {
+  const { token, password } = req.body || {};
+
+  if (!token || typeof token !== 'string' || !/^[a-f0-9]{64}$/i.test(token)) {
+    return res.status(400).json({ error: 'A valid reset token is required' });
+  }
+  if (typeof password !== 'string' || password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+  try {
+    const result = await pool.query(
+      `SELECT id FROM users WHERE password_reset_token_hash = $1 AND password_reset_expires_at > now() AND is_active = true AND email_verified = true`,
+      [tokenHash]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: 'Reset link is invalid or expired' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    await pool.query(
+      `UPDATE users SET password_hash = $1, password_reset_token_hash = NULL, password_reset_expires_at = NULL, updated_at = now() WHERE id = $2`,
+      [passwordHash, result.rows[0].id]
+    );
+
+    return res.json({ message: 'Your password has been reset. You can now sign in with your new password.' });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    return res.status(500).json({ error: 'Password reset failed' });
+  }
+});
+
 
 // POST /api/auth/login
 router.post('/login', authLimiter, async (req, res) => {

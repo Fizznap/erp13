@@ -174,8 +174,12 @@ function AuthPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setBusy(true);
     setMsg(null);
+    if (!/^[^@\s]+@ustu\.edu\.in$/i.test(email.trim())) {
+      setMsg({ ok: false, text: "Only @ustu.edu.in college emails can use Snippet." });
+      return;
+    }
+    setBusy(true);
     try {
       if (mode === "up") {
         const result = await api<{ message: string }>("/auth/register", {
@@ -301,6 +305,14 @@ function AuthPage() {
           >
             Resend verification email
           </button>
+        )}
+{mode === "in" && (
+          <Link
+            to="/forgot-password"
+            className="mt-3 block text-center text-sm text-primary-deep"
+          >
+            Forgot password?
+          </Link>
         )}
 
         <button

@@ -42,4 +42,31 @@ async function sendVerificationEmail(email, fullName, token) {
   });
 }
 
-module.exports = { makeVerificationToken, sendVerificationEmail, EmailDeliveryConfigurationError };
+async function sendPasswordResetEmail(email, fullName, token) {
+  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, CLIENT_URL } = process.env;
+  if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS || !SMTP_FROM || !CLIENT_URL) {
+    throw new EmailDeliveryConfigurationError('Email delivery is not configured');
+  }
+
+  const frontendOrigin = CLIENT_URL.split(',')[0].trim();
+  const link = new URL('/auth/reset-password', frontendOrigin);
+  link.searchParams.set('resetToken', token);
+  const displayName = escapeHtml(fullName);
+  const transporter = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: Number(SMTP_PORT),
+    secure: Number(SMTP_PORT) === 465,
+    requireTLS: Number(SMTP_PORT) !== 465,
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+  });
+
+  await transporter.sendMail({
+    from: SMTP_FROM,
+    to: email,
+    subject: 'Reset your Snippet password',
+    text: `Hello ${fullName},\n\nYou requested a password reset for your Snippet account. Click the link below to set a new password: ${link}\n\nThis link expires in 1 hour. If you did not request this reset, ignore this email and your password will remain unchanged.`,
+    html: `<p>Hello ${displayName},</p><p>You requested a password reset for your Snippet account.</p><p><a href="${link}">Reset your password</a></p><p>This link expires in 1 hour. If you did not request this reset, ignore this email and your password will remain unchanged.</p>`,
+  });
+}
+
+module.exports = { makeVerificationToken, sendVerificationEmail, sendPasswordResetEmail, EmailDeliveryConfigurationError };
