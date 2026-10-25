@@ -399,10 +399,53 @@ router.post('/refresh', authLimiter, async (req, res) => {
     if (!isProfileComplete(await loadProfile(user.id))) {
       return res.status(403).json({ error: 'Complete student onboarding before refreshing this session', code: 'PROFILE_INCOMPLETE' });
     }
+
+    // Reject if this refresh token has been revoked (logout).
+    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    const revoked = await pool.query(
+      'SELECT 1 FROM revoked_refresh_tokens WHERE token_hash = $1 AND expires_at > now()',
+      [tokenHash]
+    );
+    if (revoked.rows.length > 0) {
+      return res.status(401).json({ error: 'Refresh token has been revoked. Sign in again.' });
+    }
+
     const tokens = generateTokens(user);
     res.json({ ...tokens });
   } catch (err) {
     return res.status(401).json({ error: 'Invalid refresh token' });
+  }
+});
+
+// POST /api/auth/logout — revoke the refresh token server-side
+router.post('/logout', authenticate, async (req, res) => {
+  try {
+    const { refreshToken } = req.body || {};
+
+    if (refreshToken) {
+      const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+      // Decode the token to get its expiry for the revocation record's expires_at.
+      let expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      try {
+        const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
+        if (decoded.exp) {
+          expiresAt = new Date(decoded.exp * 1000);
+        }
+      } catch {
+        // Keep far-future expiry if the token cannot be decoded.
+      }
+      await pool.query(
+        `INSERT INTO revoked_refresh_tokens (token_hash, user_id, expires_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (token_hash) DO NOTHING`,
+        [tokenHash, req.user.id, expiresAt]
+      );
+    }
+
+    res.json({ message: 'Logged out successfully. Refresh token revoked.' });
+  } catch (err) {
+    console.error('Logout error:', err);
+    res.status(500).json({ error: 'Logout failed' });
   }
 });
 

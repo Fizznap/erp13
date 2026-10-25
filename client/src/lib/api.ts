@@ -20,7 +20,7 @@ function getToken(): string | null {
   return localStorage.getItem("snippet_token");
 }
 
-function getRefreshToken(): string | null {
+export function getRefreshToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("snippet_refresh_token");
 }
@@ -41,6 +41,22 @@ export function clearTokens() {
   localStorage.removeItem("snippet_token");
   localStorage.removeItem("snippet_refresh_token");
   localStorage.removeItem("snippet_user");
+}
+
+export async function logout(refreshToken: string | null): Promise<void> {
+  try {
+    await api("/auth/logout", {
+      method: "POST",
+      body: { refreshToken },
+    });
+  } catch {
+    // Even if the server-side revocation fails, clear local session state.
+  } finally {
+    clearTokens();
+    if (typeof window !== "undefined") {
+      window.location.href = "/auth";
+    }
+  }
 }
 
 export function getStoredUser() {
@@ -123,4 +139,25 @@ export async function api<T = unknown>(endpoint: string, options: RequestOptions
   }
 
   return res.json();
+}
+
+export async function apiBlob(endpoint: string): Promise<Blob> {
+  const request = async (token: string | null) => fetch(`${API_BASE}${endpoint}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  let res = await request(getToken());
+  if (res.status === 401 && getToken()) {
+    const newToken = await refreshAccessToken();
+    if (newToken) res = await request(newToken);
+    else {
+      clearTokens();
+      if (typeof window !== "undefined") window.location.href = "/auth";
+      throw new Error("Session expired");
+    }
+  }
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ error: "Could not load image" }));
+    throw new Error(errorData.error || `HTTP ${res.status}`);
+  }
+  return res.blob();
 }

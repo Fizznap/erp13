@@ -23,6 +23,13 @@ async function initDatabase() {
     await pool.query(studentPhotosAndAttendanceMigration);
     console.log('Student photos and manual attendance schema is up to date.');
 
+    const revokedRefreshTokensMigration = fs.readFileSync(
+      path.join(__dirname, 'migration_04_revoked_refresh_tokens.sql'),
+      'utf-8'
+    );
+    await pool.query(revokedRefreshTokensMigration);
+    console.log('Revoked refresh tokens schema is up to date.');
+
     // Add subject_offering_id and new tracking columns to resources
     await pool.query(`
       ALTER TABLE resources ADD COLUMN IF NOT EXISTS subject_offering_id UUID REFERENCES subject_offerings(id) ON DELETE CASCADE;

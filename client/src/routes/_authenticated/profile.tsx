@@ -2,6 +2,7 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useAvatarUrl } from "@/lib/avatar";
 import {
   ArrowLeft,
+  LogOut,
   Pencil,
   RotateCw,
   Mail,
@@ -11,6 +12,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useFaceStatus } from "@/lib/face";
+import { getRefreshToken, logout } from "@/lib/api";
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { AppShell, SectionTitle, Spark } from "@/components/snippet/AppShell";
@@ -21,6 +23,8 @@ export const Route = createFileRoute("/_authenticated/profile")({
   head: () => ({
     meta: [
       { title: "My Profile & ID Card — Snippet" },
+      { property: "og:title", content: "My Profile & ID Card — Snippet" },
+      { property: "og:description", content: "Your digital student ID with a scannable QR code." },
       {
         name: "description",
         content:
@@ -60,7 +64,7 @@ function Profile() {
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <p className="truncate text-center font-semibold">My ID Card</p>
+        <h1 className="truncate text-center text-base font-semibold">My Digital Student ID</h1>
         <span className="h-11 w-11" />
       </header>
 
@@ -169,6 +173,19 @@ function Profile() {
       <SectionTitle>Edit Profile</SectionTitle>
       <div className="surface mb-8 rounded-[24px] p-5">
         <ProfileForm user={me?.user} onSaved={reload} />
+      </div>
+
+      <SectionTitle>Sign Out</SectionTitle>
+      <div className="surface rounded-[24px] p-5">
+        <button
+          onClick={() => void logout(getRefreshToken())}
+          className="press w-full flex items-center gap-2 rounded-2xl border border-destructive bg-destructive/10 px-4 py-3 text-sm font-semibold text-destructive hover:bg-destructive/20"
+        >
+          <LogOut className="h-4 w-4" /> Sign out
+        </button>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Signing out revokes your refresh token server-side and clears your local session.
+        </p>
       </div>
     </AppShell>
   );
