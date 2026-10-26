@@ -1,6 +1,8 @@
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { ArrowLeft, MoreHorizontal, FolderOpen, ClipboardList, ArrowRight } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { AppShell, Progress, SectionTitle, Spark } from "@/components/snippet/AppShell";
+import { api } from "@/lib/api";
 
 export const Route = createFileRoute("/_authenticated/subjects/$subjectId")({
   head: () => ({
@@ -18,16 +20,23 @@ export const Route = createFileRoute("/_authenticated/subjects/$subjectId")({
 
 function Subject() {
   const router = useRouter();
+  const { subjectId } = Route.useParams();
+  const subject = useQuery({
+    queryKey: ["subject", subjectId],
+    queryFn: () => api<{ subject: { name: string; code: string; description?: string | null } }>(`/subjects/${subjectId}`),
+  });
+  const name = subject.data?.subject.name || "Subject";
+  const code = subject.data?.subject.code || subjectId;
   return (
     <AppShell>
       <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
         <button onClick={() => router.history.back()} aria-label="Back" className="glass press grid h-11 w-11 place-items-center rounded-full"><ArrowLeft className="h-5 w-5" /></button>
-        <p className="truncate text-center font-semibold">DBMS</p>
+        <p className="truncate text-center font-semibold">{code}</p>
         <button aria-label="More" className="glass press grid h-11 w-11 place-items-center rounded-full"><MoreHorizontal className="h-5 w-5" /></button>
       </header>
 
-      <h1 className="rise mt-8 text-[26px] font-semibold leading-tight tracking-tight">Database Management Systems</h1>
-      <p className="mt-1 text-sm text-muted-foreground">CS301 • Semester 5 • Prof. Mehta</p>
+      <h1 className="rise mt-8 text-[26px] font-semibold leading-tight tracking-tight">{name}</h1>
+      <p className="mt-1 text-sm text-muted-foreground">{code}{subject.isLoading ? " • Loading class details…" : ""}</p>
 
       <div className="surface mt-6 rounded-[24px] p-5">
         <div className="flex items-center justify-between text-sm"><span className="font-medium">Your progress</span><span className="font-semibold">72%</span></div>
@@ -62,7 +71,7 @@ function Subject() {
         <span className="orb h-11 w-11 shrink-0 rounded-full" />
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-1.5 font-semibold"><Spark /> Ask Snippet</p>
-          <p className="truncate text-sm text-accent-foreground">Ask about DBMS material</p>
+           <p className="truncate text-sm text-accent-foreground">Ask about {name} material</p>
         </div>
         <ArrowRight className="h-5 w-5 shrink-0" />
       </Link>

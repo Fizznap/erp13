@@ -10,7 +10,11 @@ let processingQueue = null;
 function initQueue() {
   if (!Queue) return null;
 
-  const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) {
+    console.warn('REDIS_URL is not configured — resource processing will run inline.');
+    return null;
+  }
 
   try {
     processingQueue = new Queue('resource-processing', redisUrl, {

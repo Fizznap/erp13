@@ -21,10 +21,10 @@ export const Route = createFileRoute("/_authenticated/")({
 });
 
 const quick = [
-  { label: "Classroom", icon: BookOpen, tint: "bg-lavender", to: "/subjects/$subjectId" },
+  { label: "Classroom", icon: BookOpen, tint: "bg-lavender", to: "/subjects" },
   { label: "Attendance", icon: CalendarCheck, tint: "bg-mint", to: "/attendance" },
   { label: "Resources", icon: FolderOpen, tint: "bg-sky", to: "/resources" },
-  { label: "Results", icon: Award, tint: "bg-peach", to: "/subjects/$subjectId" },
+  { label: "Results", icon: Award, tint: "bg-peach", to: "/subjects" },
 ];
 
 const schedule = [
@@ -73,7 +73,7 @@ function StudentHome() {
       <SectionTitle>Quick Access</SectionTitle>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {quick.map((q) => (
-          <Link key={q.label} to={q.to as "/subjects/$subjectId"} params={{ subjectId: "dbms" }} className="surface press flex min-w-0 items-center gap-3 rounded-[20px] p-3">
+          <Link key={q.label} to={q.to} className="surface press flex min-w-0 items-center gap-3 rounded-[20px] p-3">
             <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${q.tint}`}><q.icon className="h-[18px] w-[18px]" /></span>
             <span className="truncate text-sm font-medium">{q.label}</span>
           </Link>
@@ -83,7 +83,7 @@ function StudentHome() {
       <SectionTitle action={<span className="text-xs text-muted-foreground">Thu, 8 Oct</span>}>Today's Schedule</SectionTitle>
       <div className="surface divide-y divide-border rounded-[24px]">
         {schedule.map((s) => (
-          <Link key={s.time} to="/subjects/$subjectId" params={{ subjectId: "dbms" }} className="flex items-center gap-4 p-4">
+          <Link key={s.time} to="/subjects" className="flex items-center gap-4 p-4">
             <span className={`w-12 shrink-0 text-sm font-semibold ${s.now ? "text-primary-deep" : "text-muted-foreground"}`}>{s.time}</span>
             <div className="min-w-0 flex-1">
               <p className="truncate font-medium">{s.name}</p>

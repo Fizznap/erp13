@@ -11,7 +11,7 @@ export function Spark({ className = "" }: { className?: string }) {
 
 const tabs = [
   { to: "/", label: "Home", icon: Home },
-  { to: "/subjects/$subjectId", params: { subjectId: "dbms" }, label: "Class", icon: GraduationCap },
+  { to: "/subjects", label: "Class", icon: GraduationCap },
   { to: "/ask", label: "AI", ai: true },
   { to: "/resources", label: "Feed", icon: Rss },
   { to: "/profile", label: "Profile", icon: UserRound },

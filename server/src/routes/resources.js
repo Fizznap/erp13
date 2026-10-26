@@ -26,7 +26,7 @@ const upload = multer({
   storage,
   limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 20 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype !== 'application/pdf') {
+    if (file.mimetype !== 'application/pdf' && path.extname(file.originalname).toLowerCase() !== '.pdf') {
       return cb(new Error('Only PDF files are allowed'), false);
     }
     cb(null, true);
@@ -79,7 +79,7 @@ async function canAccessResource(user, resourceId) {
   const result = await pool.query(
     `SELECT r.id, r.subject_id, r.subject_offering_id, r.uploaded_by, r.filename,
             r.original_name, r.file_path, r.file_size, r.mime_type, r.status,
-            r.kind, r.progress, r.stage, r.created_at, r.processed_at,
+            r.kind, r.progress, r.stage, r.error_message, r.created_at, r.processed_at,
             so.faculty_id AS offering_faculty_id, ac.id AS class_id
      FROM resources r
      LEFT JOIN subject_offerings so ON so.id = r.subject_offering_id
@@ -170,14 +170,22 @@ router.post('/upload', authenticate, authorize('faculty'), upload.single('file')
       const { getProcessingQueue } = require('../jobs/queue');
       const queue = getProcessingQueue();
       if (queue) {
-        await queue.add('process-resource', { resourceId: resource.id }, {
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 5000 },
-        });
+        await Promise.race([
+          queue.add('process-resource', { resourceId: resource.id }, {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 5000 },
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Resource queue timed out')), 5000)),
+        ]);
+      } else {
+        throw new Error('Resource queue is unavailable');
       }
     } catch (queueErr) {
-      console.warn('Queue not available, resource will need manual processing:', queueErr.message);
-      // Still return success — resource is saved, just not auto-processed
+      console.warn('Queue unavailable; processing resource inline:', queueErr.message);
+      const { processResource } = require('../services/processor');
+      void processResource(resource.id).catch((processingErr) => {
+        console.error(`Inline processing failed for resource ${resource.id}:`, processingErr.message);
+      });
     }
 
     res.status(201).json({ resource });

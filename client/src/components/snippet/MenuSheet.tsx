@@ -9,10 +9,10 @@ import { useAvatarUrl } from "@/lib/avatar";
 
 const items = [
   { label: "Home", icon: Home, to: "/" },
-  { label: "Classroom", icon: GraduationCap, to: "/subjects/$subjectId" },
+  { label: "Classroom", icon: GraduationCap, to: "/subjects" },
   { label: "Attendance", icon: CalendarCheck, to: "/attendance" },
   { label: "Resources", icon: FolderOpen, to: "/resources" },
-  { label: "Results", icon: Award, to: "/subjects/$subjectId" },
+  { label: "Results", icon: Award, to: "/subjects" },
   { label: "Reminders", icon: Bell, to: "/reminders" },
   { label: "My ID Card", icon: IdCard, to: "/profile" },
 ] as const;
@@ -44,7 +44,7 @@ export function MenuSheet() {
           </Link>
           <nav className="mt-6 flex-1 space-y-1">
             {items.map((i) => (
-              <Link key={i.label} to={i.to} params={{ subjectId: "dbms" } as never}
+              <Link key={i.label} to={i.to}
                 className="press flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium hover:bg-card">
                 <i.icon className="h-[18px] w-[18px] text-muted-foreground" /> {i.label}
               </Link>

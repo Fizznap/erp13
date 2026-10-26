@@ -19,11 +19,19 @@ router.get('/', authenticate, async (req, res) => {
 
       result = await pool.query(
         `SELECT s.*, so.id AS offering_id, u.full_name AS faculty_name,
+                br.name AS branch_name, br.code AS branch_code,
+                d.name AS division_name, ba.start_year AS batch_start_year,
+                ba.end_year AS batch_end_year, sem.number AS semester_number,
                 (SELECT COUNT(*) FROM resources WHERE subject_offering_id = so.id AND status = 'ready') AS resource_count,
                 true AS is_enrolled
          FROM subject_offerings so
          JOIN subjects s ON so.subject_id = s.id
          JOIN users u ON u.id = so.faculty_id
+         JOIN academic_classes ac ON ac.id = so.academic_class_id
+         JOIN branches br ON br.id = ac.branch_id
+         JOIN divisions d ON d.id = ac.division_id
+         JOIN batches ba ON ba.id = ac.batch_id
+         JOIN semesters sem ON sem.id = ac.semester_id
          WHERE so.academic_class_id = $1
          ORDER BY s.name`,
         [classId]
@@ -133,7 +141,23 @@ router.post('/offerings', authenticate, authorize('admin', 'faculty'), async (re
 router.get('/:id', authenticate, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT s.* FROM subjects s WHERE s.id = $1`,
+      `SELECT s.*,
+              so.id AS offering_id, u.full_name AS faculty_name,
+              br.name AS branch_name, br.code AS branch_code,
+              d.name AS division_name, ba.start_year AS batch_start_year,
+              ba.end_year AS batch_end_year, sem.number AS semester_number,
+              (SELECT COUNT(*) FROM resources r WHERE r.subject_id = s.id AND r.status = 'ready') AS resource_count
+       FROM subjects s
+       LEFT JOIN subject_offerings so ON so.subject_id = s.id
+       LEFT JOIN users u ON u.id = so.faculty_id
+       LEFT JOIN academic_classes ac ON ac.id = so.academic_class_id
+       LEFT JOIN branches br ON br.id = ac.branch_id
+       LEFT JOIN divisions d ON d.id = ac.division_id
+       LEFT JOIN batches ba ON ba.id = ac.batch_id
+       LEFT JOIN semesters sem ON sem.id = ac.semester_id
+       WHERE s.id = $1
+       ORDER BY sem.number DESC NULLS LAST
+       LIMIT 1`,
       [req.params.id]
     );
 
