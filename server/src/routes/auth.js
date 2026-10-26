@@ -17,6 +17,7 @@ const {
 } = require('../services/emailVerification');
 
 const router = express.Router();
+const configuredAdminEmail = () => process.env.ADMIN_EMAIL?.trim().toLowerCase() || '';
 const avatarUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024, files: 1 },
@@ -346,7 +347,7 @@ router.post('/login', authLimiter, async (req, res) => {
     if (!email || typeof password !== 'string' || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
-    if (!isCollegeEmail(email)) {
+    if (!isCollegeEmail(email) && email !== configuredAdminEmail()) {
       return res.status(403).json({ error: 'Use your @ustu.edu.in college email' });
     }
 

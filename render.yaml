@@ -64,9 +64,9 @@ services:
       - key: CLIENT_URL
         value: "https://client-phi-lake.vercel.app"
       - key: ADMIN_EMAIL
-        sync: false
+        value: "smit2shinde2@gmail.com"
       - key: ADMIN_NAME
-        sync: false
+        value: "Smit Shinde"
       - key: ADMIN_PASSWORD
         sync: false
       - key: CURRENT_SEMESTER_NUMBER
