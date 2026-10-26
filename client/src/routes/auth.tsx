@@ -6,6 +6,7 @@ import { api, setTokens, setOnboardingToken, getStoredUser, setStoredUser } from
 import { useQueryClient } from "@tanstack/react-query";
 
 const GOOGLE_CLIENT_ID = import.meta.env["VITE_GOOGLE_CLIENT_ID"] as string | undefined;
+const ADMIN_EMAIL = (import.meta.env["VITE_ADMIN_EMAIL"] as string | undefined || "smit2shinde2@gmail.com").trim().toLowerCase();
 type AuthResponse = {
   accessToken: string;
   refreshToken: string | null;
@@ -175,8 +176,10 @@ function AuthPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMsg(null);
-    if (!/^[^@\s]+@ustu\.edu\.in$/i.test(email.trim())) {
-      setMsg({ ok: false, text: "Only @ustu.edu.in college emails can use Snippet." });
+    const normalizedEmail = email.trim().toLowerCase();
+    const isCollegeEmail = /^[^@\s]+@ustu\.edu\.in$/i.test(normalizedEmail);
+    if (mode === "up" ? !isCollegeEmail : !isCollegeEmail && normalizedEmail !== ADMIN_EMAIL) {
+      setMsg({ ok: false, text: mode === "up" ? "Only @ustu.edu.in college emails can register." : "Use your registered account email." });
       return;
     }
     setBusy(true);
