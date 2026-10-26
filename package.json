@@ -2,9 +2,13 @@
   "name": "snippet",
   "private": true,
   "description": "AI-Powered Course Intelligence Platform",
+  "workspaces": [
+    "client"
+  ],
   "scripts": {
     "server": "cd server && npm run dev",
     "client": "cd client && npm run dev",
+    "build": "npm run build --workspace client",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "setup": "cd server && npm install && cd ../client && npm install",
     "db:init": "cd server && node src/db/init.js"
