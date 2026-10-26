@@ -32,6 +32,13 @@ const quick = [
 function Home() {
   const { me } = useMe();
   const student = useAvatarUrl(me?.avatar);
+  if (!me) {
+    return (
+      <AppShell>
+        <p className="py-12 text-center text-sm text-muted-foreground">Loading your dashboard…</p>
+      </AppShell>
+    );
+  }
   return (
     <AppShell>
       <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
@@ -40,7 +47,7 @@ function Home() {
         <Link to="/profile" aria-label="Profile" className="press block h-11 w-11 overflow-hidden rounded-full ring-2 ring-card">{student ? <img src={student} alt="" width={44} height={44} className="h-full w-full object-cover object-top" /> : <span className="grid h-full w-full place-items-center bg-muted text-sm font-semibold">{me?.name?.[0] ?? ""}</span>}</Link>
       </header>
 
-      {me?.isFaculty ? <FacultyHome name={me.name} /> : me?.isAdmin ? <AdminHome name={me.name} /> : <StudentHome />}
+      {me.isFaculty ? <FacultyHome name={me.name} /> : me.isAdmin ? <AdminHome name={me.name} /> : <StudentHome />}
     </AppShell>
   );
 }
@@ -69,7 +76,7 @@ function StudentHome() {
         <p className="mt-2 max-w-[16rem] text-lg font-medium leading-snug">Ask anything about your course material</p>
         <div className="mt-4 flex items-center justify-between">
           <span className="rounded-full bg-card/50 px-3 py-1 text-xs font-medium">
-            {subjects.data?.subjects.length ? `${subjects.data.subjects.length} assigned subjects` : "Your assigned subjects"}
+            {subjects.data?.subjects?.length ? `${subjects.data.subjects.length} assigned subjects` : "Your assigned subjects"}
           </span>
           <span className="grid h-10 w-10 place-items-center rounded-full bg-foreground text-background"><ArrowRight className="h-4 w-4" /></span>
         </div>
