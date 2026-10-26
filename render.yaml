@@ -20,7 +20,7 @@ services:
     region: oregon
     rootDir: server
     buildCommand: npm ci --production
-    startCommand: npm run db:init && npm run db:seed:students && node src/index.js
+    startCommand: npm run db:init && npm run db:cleanup:demo && npm run db:seed:admin && npm run db:seed:students && node src/index.js
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
@@ -63,6 +63,16 @@ services:
         sync: false
       - key: CLIENT_URL
         value: "https://client-phi-lake.vercel.app"
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_NAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: CURRENT_SEMESTER_NUMBER
+        sync: false
+      - key: ACADEMIC_SUBJECTS_JSON
+        sync: false
       - key: UPLOAD_DIR
         value: ./uploads     # Ephemeral storage since disks aren't supported on free tier
       - key: MAX_FILE_SIZE

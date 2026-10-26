@@ -16,12 +16,7 @@ export const Route = createFileRoute("/_authenticated/reminders")({
     <AppShell>
       <h1 className="rise text-[28px] font-semibold tracking-tight">Reminders</h1>
       <div className="mt-6 space-y-3">
-        {[["DBMS Assignment 2", "Due tomorrow, 11:59 PM", "bg-peach"], ["OS Internal Test 2", "Mon, 12 Oct • 10:00", "bg-lavender"], ["CN Lab record", "Fri, 16 Oct", "bg-sky"]].map(([t, d, c]) => (
-          <div key={t} className="surface flex items-center gap-3 rounded-[22px] p-4">
-            <span className={`h-10 w-1.5 shrink-0 rounded-full ${c}`} />
-            <div className="min-w-0"><p className="truncate font-medium">{t}</p><p className="text-xs text-muted-foreground">{d}</p></div>
-          </div>
-        ))}
+        <p className="surface rounded-[22px] p-4 text-sm text-muted-foreground">No reminders have been published.</p>
       </div>
     </AppShell>
   ),

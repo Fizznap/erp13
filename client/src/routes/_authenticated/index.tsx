@@ -1,10 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { BookOpen, CalendarCheck, FolderOpen, Award, ArrowRight, MapPin } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { BookOpen, CalendarCheck, FolderOpen, Award, ArrowRight } from "lucide-react";
 import { MenuSheet } from "@/components/snippet/MenuSheet";
 import { useMe } from "@/hooks/use-auth";
 import { useAvatarUrl } from "@/lib/avatar";
 import { FacultyHome } from "@/components/snippet/FacultyHome";
 import { AppShell, Progress, SectionTitle, Spark } from "@/components/snippet/AppShell";
+import { api } from "@/lib/api";
 
 export const Route = createFileRoute("/_authenticated/")({
   head: () => ({
@@ -27,17 +29,6 @@ const quick = [
   { label: "Results", icon: Award, tint: "bg-peach", to: "/subjects" },
 ];
 
-const schedule = [
-  { time: "10:00", name: "DBMS", room: "Room 204", now: true },
-  { time: "11:30", name: "Operating Systems", room: "Lab 3" },
-  { time: "14:00", name: "Computer Networks", room: "Room 110" },
-];
-
-const feed = [
-  { who: "Prof. Mehta", what: "Uploaded Unit 2 slides for DBMS", when: "20m", ai: true },
-  { who: "Exam Cell", what: "Internal Test 2 timetable published", when: "2h" },
-];
-
 function Home() {
   const { me } = useMe();
   const student = useAvatarUrl(me?.avatar);
@@ -49,12 +40,24 @@ function Home() {
         <Link to="/profile" aria-label="Profile" className="press block h-11 w-11 overflow-hidden rounded-full ring-2 ring-card">{student ? <img src={student} alt="" width={44} height={44} className="h-full w-full object-cover object-top" /> : <span className="grid h-full w-full place-items-center bg-muted text-sm font-semibold">{me?.name?.[0] ?? ""}</span>}</Link>
       </header>
 
-      {me?.isFaculty ? <FacultyHome name={me.name} /> : <StudentHome />}
+      {me?.isFaculty ? <FacultyHome name={me.name} /> : me?.isAdmin ? <AdminHome name={me.name} /> : <StudentHome />}
     </AppShell>
   );
 }
 
 function StudentHome() {
+  const subjects = useQuery({
+    queryKey: ["subjects"],
+    queryFn: () => api<{ subjects: unknown[] }>("/subjects"),
+  });
+  const attendance = useQuery({
+    queryKey: ["my-history"],
+    queryFn: () => api<{ records: { status: string }[] }>("/attendance/my/records"),
+  });
+  const records = attendance.data?.records ?? [];
+  const present = records.filter((record) => record.status === "present").length;
+  const attendanceRate = records.length ? (present / records.length) * 100 : null;
+
   return (
     <>
       <h1 className="rise mt-8 text-[28px] font-semibold leading-tight tracking-tight sm:text-4xl">
@@ -65,7 +68,9 @@ function StudentHome() {
         <div className="flex items-center gap-2 text-sm font-semibold"><Spark /> Ask Snippet</div>
         <p className="mt-2 max-w-[16rem] text-lg font-medium leading-snug">Ask anything about your course material</p>
         <div className="mt-4 flex items-center justify-between">
-          <span className="rounded-full bg-card/50 px-3 py-1 text-xs font-medium">Based on 5 subjects</span>
+          <span className="rounded-full bg-card/50 px-3 py-1 text-xs font-medium">
+            {subjects.data?.subjects.length ? `${subjects.data.subjects.length} assigned subjects` : "Your assigned subjects"}
+          </span>
           <span className="grid h-10 w-10 place-items-center rounded-full bg-foreground text-background"><ArrowRight className="h-4 w-4" /></span>
         </div>
       </Link>
@@ -80,41 +85,36 @@ function StudentHome() {
         ))}
       </div>
 
-      <SectionTitle action={<span className="text-xs text-muted-foreground">Thu, 8 Oct</span>}>Today's Schedule</SectionTitle>
+      <SectionTitle>Today's Schedule</SectionTitle>
       <div className="surface divide-y divide-border rounded-[24px]">
-        {schedule.map((s) => (
-          <Link key={s.time} to="/subjects" className="flex items-center gap-4 p-4">
-            <span className={`w-12 shrink-0 text-sm font-semibold ${s.now ? "text-primary-deep" : "text-muted-foreground"}`}>{s.time}</span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate font-medium">{s.name}</p>
-              <p className="flex items-center gap-1 text-xs text-muted-foreground"><MapPin className="h-3 w-3" />{s.room}</p>
-            </div>
-            {s.now && <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-accent-foreground">Now</span>}
-            <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-          </Link>
-        ))}
+        <p className="p-4 text-sm text-muted-foreground">No schedule has been published yet.</p>
       </div>
 
       <SectionTitle action={<Link to="/attendance" className="text-xs font-medium text-primary-deep">Mark &amp; view</Link>}>Attendance</SectionTitle>
       <div className="surface rounded-[24px] p-5">
         <div className="flex items-end justify-between">
-          <p className="text-4xl font-semibold tracking-tight">87.4<span className="text-xl text-muted-foreground">%</span></p>
-          <p className="text-xs text-muted-foreground">Required 75%</p>
+          <p className="text-4xl font-semibold tracking-tight">{attendanceRate == null ? "—" : attendanceRate.toFixed(1)}{attendanceRate != null && <span className="text-xl text-muted-foreground">%</span>}</p>
+          <p className="text-xs text-muted-foreground">{records.length ? `${present} of ${records.length} sessions` : "No attendance records yet"}</p>
         </div>
-        <div className="mt-4"><Progress value={87.4} /></div>
-        <p className="mt-3 text-xs text-muted-foreground">You can skip 4 more classes and stay safe.</p>
+        {attendanceRate != null && <div className="mt-4"><Progress value={attendanceRate} /></div>}
       </div>
 
       <SectionTitle>Feed</SectionTitle>
       <div className="space-y-3">
-        {feed.map((f) => (
-          <div key={f.what} className="surface rounded-[22px] p-4">
-            <div className="flex items-center justify-between text-xs text-muted-foreground"><span className="font-medium text-foreground">{f.who}</span>{f.when}</div>
-            <p className="mt-1 text-sm">{f.what}</p>
-            {f.ai && <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-foreground"><Spark /> AI summary available</p>}
-          </div>
-        ))}
+        <p className="surface rounded-[22px] p-4 text-sm text-muted-foreground">No updates yet.</p>
       </div>
+    </>
+  );
+}
+
+function AdminHome({ name }: { name: string }) {
+  return (
+    <>
+      <h1 className="rise mt-8 text-[28px] font-semibold leading-tight tracking-tight">Welcome, {name}</h1>
+      <p className="mt-2 text-sm text-muted-foreground">Manage the academic structure, users and subjects from the administrator console.</p>
+      <Link to="/admin" className="press mt-6 flex items-center justify-between rounded-[24px] bg-ai p-5 text-sm font-semibold text-primary-foreground shadow-float">
+        Open administrator console <ArrowRight className="h-4 w-4" />
+      </Link>
     </>
   );
 }

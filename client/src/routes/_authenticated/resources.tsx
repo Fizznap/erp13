@@ -96,7 +96,7 @@ function Resources() {
         </select>
       ) : null}
 
-      {me?.isFaculty && <UploadCard userId={me.user.id} subjects={subjectsQuery.data || []} />}
+      {(me?.isFaculty || me?.isAdmin) && <UploadCard subjects={subjectsQuery.data || []} />}
       
       <label className="glass mt-5 flex items-center gap-2 rounded-[20px] px-4 py-3">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by title…" className="min-w-0 flex-1 bg-transparent text-sm outline-hidden placeholder:text-muted-foreground" />
@@ -135,7 +135,7 @@ function Resources() {
 
               <div className="mt-3 flex gap-2">
                 <button onClick={() => open(r.id)} className="press flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-foreground py-2.5 text-sm font-semibold text-background"><Download className="h-4 w-4" /> Open</button>
-                {me?.isFaculty && <DeleteBtn id={r.id} />}
+                {(me?.isFaculty || me?.isAdmin) && <DeleteBtn id={r.id} />}
               </div>
             </article>
           );
@@ -163,7 +163,7 @@ function DeleteBtn({ id }: { id: string }) {
 
 import { useEffect } from "react";
 
-function UploadCard({ userId, subjects }: { userId: string, subjects: any[] }) {
+function UploadCard({ subjects }: { subjects: any[] }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [offeringId, setOfferingId] = useState("");

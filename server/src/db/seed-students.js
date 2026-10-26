@@ -6,16 +6,25 @@ require('dotenv').config();
 
 const DEFAULT_ROSTER_URL = 'https://docs.google.com/spreadsheets/d/1rPyoy2ORmsyf703dsrrZ7ftirjlPonNwW_I1wZb_0yM/export?format=csv';
 const ROSTER_URL = process.env.STUDENT_ROSTER_URL || DEFAULT_ROSTER_URL;
-const SEMESTER_NUMBER = Number(process.env.CURRENT_SEMESTER_NUMBER || 5);
-const FACULTY_EMAIL = (process.env.ROSTER_FACULTY_EMAIL || 'faculty@ustu.edu.in').trim().toLowerCase();
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+const SEMESTER_NUMBER = Number(process.env.CURRENT_SEMESTER_NUMBER);
 
-const SUBJECTS = [
-  ['CS301', 'Database Management Systems', 'Relational databases, modelling, SQL, normalization and transactions.'],
-  ['CS302', 'Operating Systems', 'Processes, memory, scheduling, filesystems and operating-system design.'],
-  ['CS303', 'Computer Networks', 'Networking models, protocols, routing, transport and application services.'],
-  ['CS304', 'Software Engineering', 'Requirements, design, testing, delivery and software project practices.'],
-  ['CS301L', 'DBMS Lab', 'Practical database exercises and lab attendance.'],
-];
+function configuredSubjects() {
+  if (!process.env.ACADEMIC_SUBJECTS_JSON?.trim()) return [];
+  let values;
+  try {
+    values = JSON.parse(process.env.ACADEMIC_SUBJECTS_JSON);
+  } catch {
+    throw new Error('ACADEMIC_SUBJECTS_JSON must be valid JSON');
+  }
+  if (!Array.isArray(values)) throw new Error('ACADEMIC_SUBJECTS_JSON must be an array');
+  return values.map((subject) => {
+    if (!subject || !subject.code || !subject.name) {
+      throw new Error('Each configured subject needs code and name');
+    }
+    return [String(subject.code).trim(), String(subject.name).trim(), subject.description ? String(subject.description).trim() : null];
+  });
+}
 
 function parseCsv(input) {
   const rows = [];
@@ -75,10 +84,7 @@ async function fetchRoster() {
 }
 
 async function ensureUser(client, { email, fullName, role }) {
-  const passwordHash = await bcrypt.hash(
-    process.env.ROSTER_DEFAULT_PASSWORD || crypto.randomBytes(32).toString('hex'),
-    12,
-  );
+  const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
   const result = await client.query(
     `INSERT INTO users (email, password_hash, full_name, role, is_active, email_verified)
      VALUES ($1, $2, $3, $4, true, true)
@@ -91,6 +97,11 @@ async function ensureUser(client, { email, fullName, role }) {
 }
 
 async function importStudents() {
+  if (!ADMIN_EMAIL) throw new Error('ADMIN_EMAIL must be configured before importing the roster');
+  if (!Number.isInteger(SEMESTER_NUMBER) || SEMESTER_NUMBER < 1) {
+    throw new Error('CURRENT_SEMESTER_NUMBER must be configured as a positive integer');
+  }
+  const subjectsToImport = configuredSubjects();
   const sourceRows = await fetchRoster();
   const records = sourceRows.map((row) => {
     const details = sectionDetails(row['Programme Section']);
@@ -102,30 +113,33 @@ async function importStudents() {
       branchCode: branchCode(row.Programme),
       division: details?.division,
       labBatch: details?.labBatch,
-      admissionYear: Number(row['Batch Year']) || 2024,
-      graduationYear: Number(row['Expected Graduation Year']) || 2028,
+      admissionYear: Number(row['Batch Year']),
+      graduationYear: Number(row['Expected Graduation Year']),
     };
-  }).filter((record) => record.registrationId && record.name && record.email && record.branchCode && record.division);
+  }).filter((record) => record.registrationId && record.name && record.email && record.branchCode && record.division &&
+    Number.isInteger(record.admissionYear) && Number.isInteger(record.graduationYear));
 
-  // The supplied CYS rows contain only "A" and no lab batch. Keep their split
-  // deterministic until the department publishes the actual lab roster.
-  const cysRows = records.filter((record) => record.branchCode === 'BTECH-CYS' && !record.labBatch)
-    .sort((a, b) => a.registrationId.localeCompare(b.registrationId));
-  cysRows.forEach((record, index) => { record.labBatch = index % 2 === 0 ? 'I' : 'II'; });
+  const batchStartYear = records[0]?.admissionYear;
+  const batchEndYear = records[0]?.graduationYear;
+  if (!batchStartYear || !batchEndYear || records.some((record) => record.admissionYear !== batchStartYear || record.graduationYear !== batchEndYear)) {
+    throw new Error('The roster must contain one consistent admission and graduation year');
+  }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const facultyId = await ensureUser(client, {
-      email: FACULTY_EMAIL,
-      fullName: process.env.ROSTER_FACULTY_NAME || 'Course Faculty',
-      role: 'faculty',
-    });
+    const admin = await client.query(
+      'SELECT id FROM users WHERE lower(email) = $1 AND role = \'admin\' AND is_active = true',
+      [ADMIN_EMAIL],
+    );
+    if (!admin.rows.length) throw new Error(`Configured admin account ${ADMIN_EMAIL} was not found`);
+    const adminId = admin.rows[0].id;
 
     const batch = await client.query(
-      `INSERT INTO batches (start_year, end_year) VALUES (2024, 2028)
+      `INSERT INTO batches (start_year, end_year) VALUES ($1, $2)
        ON CONFLICT (start_year, end_year) DO UPDATE SET end_year = EXCLUDED.end_year
        RETURNING id`,
+      [batchStartYear, batchEndYear],
     );
     const batchId = batch.rows[0].id;
 
@@ -138,14 +152,14 @@ async function importStudents() {
     const semesterId = semester.rows[0].id;
 
     const subjects = {};
-    for (const [code, name, description] of SUBJECTS) {
+    for (const [code, name, description] of subjectsToImport) {
       const result = await client.query(
         `INSERT INTO subjects (name, code, description, faculty_id)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description,
            faculty_id = COALESCE(subjects.faculty_id, EXCLUDED.faculty_id)
          RETURNING id`,
-        [name, code, description, facultyId],
+        [name, code, description, adminId],
       );
       subjects[code] = result.rows[0].id;
     }
@@ -189,7 +203,7 @@ async function importStudents() {
         `INSERT INTO user_profiles (user_id, college_id, program, roll_number, year_of_study,
                                     admission_year, expected_graduation_year, academic_lab_group_id,
                                     registration_completed_at)
-         VALUES ($1, $2, $3, $4, 3, $5, $6, $7, now())
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
          ON CONFLICT (user_id) DO UPDATE SET college_id = EXCLUDED.college_id,
            program = EXCLUDED.program, roll_number = EXCLUDED.roll_number,
            year_of_study = EXCLUDED.year_of_study, admission_year = EXCLUDED.admission_year,
@@ -197,7 +211,7 @@ async function importStudents() {
            academic_lab_group_id = EXCLUDED.academic_lab_group_id,
            registration_completed_at = COALESCE(user_profiles.registration_completed_at, EXCLUDED.registration_completed_at),
            updated_at = now()`,
-        [userId, record.registrationId, record.programme, record.registrationId, record.admissionYear, record.graduationYear, labGroupId],
+        [userId, record.registrationId, record.programme, record.registrationId, Math.ceil(SEMESTER_NUMBER / 2), record.admissionYear, record.graduationYear, labGroupId],
       );
     }
 
@@ -207,13 +221,13 @@ async function importStudents() {
           `INSERT INTO subject_offerings (subject_id, academic_class_id, faculty_id)
            VALUES ($1, $2, $3)
            ON CONFLICT (subject_id, academic_class_id) DO UPDATE SET faculty_id = EXCLUDED.faculty_id`,
-          [subjectId, academicClassId, facultyId],
+          [subjectId, academicClassId, adminId],
         );
       }
     }
 
     await client.query('COMMIT');
-    console.log(`Imported ${records.length} students, ${classIds.size} classes, and ${Object.keys(subjects).length} subjects from ${ROSTER_URL}`);
+    console.log(`Imported ${records.length} students, ${classIds.size} classes, and ${Object.keys(subjects).length} configured subjects from ${ROSTER_URL}`);
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

@@ -1,11 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
-import { Radio, CheckCircle2, Clock, ArrowUp, Presentation } from "lucide-react";
+import { Radio, CheckCircle2, Clock, Presentation } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import { AppShell, SectionTitle, Spark } from "@/components/snippet/AppShell";
-import { askAttendanceAI } from "@/lib/attendance.functions";
+import { AppShell, SectionTitle } from "@/components/snippet/AppShell";
 import { useMe } from "@/hooks/use-auth";
 import { SignInHelp } from "@/components/snippet/SignInHelp";
 import { ManualRequest } from "@/components/snippet/ManualRequest";
@@ -33,7 +30,6 @@ function useCountdown(to?: string | null) {
   const s = Math.max(0, Math.floor((new Date(to).getTime() - now) / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
-
 function Ring({ value }: { value: number }) {
   const r = 34, c = 2 * Math.PI * r;
   return (
@@ -181,7 +177,6 @@ function Attendance() {
         {session && !marked && <ManualRequest sessionId={session.id} />}
       </section>
 
-      <AskAttendance />
       <AttendancePlan />
       <SignInHelp page="attendance" />
 
@@ -229,66 +224,5 @@ function Attendance() {
         ))}
       </div>
     </AppShell>
-  );
-}
-
-const suggestions = ["Which classes need my attention?", "How is my attendance trending?", "How many classes can I skip?"];
-
-function AskAttendance() {
-  const [msgs, setMsgs] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
-  const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-
-  const send = async (q: string) => {
-    const text = q.trim(); if (!text || busy) return;
-    const next = [...msgs, { role: "user" as const, content: text }];
-    setMsgs(next); setInput(""); setBusy(true); setErr("");
-    try {
-      // In the real Snippet, askAttendanceAI would call the backend /api/ai/attendance endpoints if they exist.
-      // For now, we mock it or show an error if it doesn't exist yet.
-      const res = await api<{ answer: string }>('/ask', { method: 'POST', body: { query: text, subjectId: 1 } });
-      setMsgs([...next, { role: "assistant", content: res.answer }]);
-    } catch (e: any) {
-      setErr(e.message || "Something went wrong");
-    } finally { setBusy(false); }
-  };
-
-  return (
-    <section className="mt-8 rounded-[26px] border border-border bg-accent p-5">
-      <div className="flex items-center gap-3">
-        <span className="orb h-10 w-10 shrink-0 rounded-full" />
-        <div className="min-w-0">
-          <p className="flex items-center gap-1.5 font-semibold"><Spark /> Ask about your attendance</p>
-          <p className="text-xs text-accent-foreground">Based on your real attendance records</p>
-        </div>
-      </div>
-
-      {msgs.length > 0 && (
-        <div className="mt-4 space-y-3">
-          {msgs.map((m, i) => m.role === "user" ? (
-            <p key={i} className="ml-auto w-fit max-w-[85%] rounded-[18px] rounded-br-md bg-foreground px-4 py-2.5 text-sm text-background">{m.content}</p>
-          ) : (
-            <div key={i} className="rounded-[18px] bg-card p-4 text-sm leading-relaxed [&_li]:ml-4 [&_li]:list-disc [&_p+p]:mt-2 [&_strong]:font-semibold [&_ul]:mt-2 [&_ul]:space-y-1">
-              <ReactMarkdown>{m.content}</ReactMarkdown>
-            </div>
-          ))}
-          {busy && <p className="flex items-center gap-2 text-xs text-accent-foreground"><span className="orb h-4 w-4 rounded-full animate-pulse" /> Looking at your records…</p>}
-        </div>
-      )}
-      {err && <p className="mt-3 text-xs text-destructive">{err}</p>}
-
-      {msgs.length === 0 && (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {suggestions.map((s) => (
-            <button key={s} onClick={() => send(s)} disabled={busy} className="press rounded-full bg-card px-3 py-1.5 text-xs font-medium disabled:opacity-50">{s}</button>
-          ))}
-        </div>
-      )}
-      <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="mt-4 flex items-center gap-2 rounded-[20px] bg-card p-1.5">
-        <input value={input} onChange={(e) => setInput(e.target.value)} maxLength={2000} placeholder="Ask anything about your attendance…" className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-hidden placeholder:text-muted-foreground" />
-        <button disabled={!input.trim() || busy} aria-label="Send" className="press grid h-10 w-10 shrink-0 place-items-center rounded-full bg-ai text-primary-foreground disabled:opacity-40"><ArrowUp className="h-5 w-5" /></button>
-      </form>
-    </section>
   );
 }

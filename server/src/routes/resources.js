@@ -111,7 +111,7 @@ async function canAccessResource(user, resourceId) {
 }
 
 // POST /api/resources/upload — upload a PDF
-router.post('/upload', authenticate, authorize('faculty'), upload.single('file'), async (req, res) => {
+router.post('/upload', authenticate, authorize('faculty', 'admin'), upload.single('file'), async (req, res) => {
   try {
     const { subjectOfferingId, subjectId, kind } = req.body;
     
@@ -126,10 +126,12 @@ router.post('/upload', authenticate, authorize('faculty'), upload.single('file')
 
     if (subjectOfferingId) {
       // Verify faculty owns this offering
-      const offering = await pool.query(
-        'SELECT subject_id FROM subject_offerings WHERE id = $1 AND faculty_id = $2',
-        [subjectOfferingId, req.user.id]
-      );
+      const offering = req.user.role === 'admin'
+        ? await pool.query('SELECT subject_id FROM subject_offerings WHERE id = $1', [subjectOfferingId])
+        : await pool.query(
+          'SELECT subject_id FROM subject_offerings WHERE id = $1 AND faculty_id = $2',
+          [subjectOfferingId, req.user.id]
+        );
       if (offering.rows.length === 0) {
         if (req.file) fs.unlinkSync(req.file.path);
         return res.status(403).json({ error: 'You do not own this subject offering' });
@@ -137,10 +139,12 @@ router.post('/upload', authenticate, authorize('faculty'), upload.single('file')
       actualSubjectId = offering.rows[0].subject_id;
     } else {
       // Legacy path
-      const subject = await pool.query(
-        'SELECT id FROM subjects WHERE id = $1 AND faculty_id = $2',
-        [subjectId, req.user.id]
-      );
+      const subject = req.user.role === 'admin'
+        ? await pool.query('SELECT id FROM subjects WHERE id = $1', [subjectId])
+        : await pool.query(
+          'SELECT id FROM subjects WHERE id = $1 AND faculty_id = $2',
+          [subjectId, req.user.id]
+        );
       if (subject.rows.length === 0) {
         if (req.file) fs.unlinkSync(req.file.path);
         return res.status(403).json({ error: 'You do not own this subject' });

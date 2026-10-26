@@ -3,14 +3,15 @@ import { ArrowLeft, MoreHorizontal, FolderOpen, ClipboardList, ArrowRight } from
 import { useQuery } from "@tanstack/react-query";
 import { AppShell, Progress, SectionTitle, Spark } from "@/components/snippet/AppShell";
 import { api } from "@/lib/api";
+import { useMe } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/_authenticated/subjects/$subjectId")({
   head: () => ({
     meta: [
-      { title: "DBMS — Snippet" },
-      { name: "description", content: "Progress, coursework, assessments and AI study help for Database Management Systems." },
-      { property: "og:title", content: "DBMS — Snippet" },
-      { property: "og:description", content: "Your subject hub: progress, resources, assignments and results." },
+      { title: "Subject — Snippet" },
+      { name: "description", content: "Resources and study help for your subject." },
+      { property: "og:title", content: "Subject — Snippet" },
+      { property: "og:description", content: "Your subject resources and study help." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -21,12 +22,22 @@ export const Route = createFileRoute("/_authenticated/subjects/$subjectId")({
 function Subject() {
   const router = useRouter();
   const { subjectId } = Route.useParams();
+  const { me } = useMe();
   const subject = useQuery({
     queryKey: ["subject", subjectId],
-    queryFn: () => api<{ subject: { name: string; code: string; description?: string | null } }>(`/subjects/${subjectId}`),
+    queryFn: () => api<{ subject: { name: string; code: string; description?: string | null; resource_count?: number | string | null } }>(`/subjects/${subjectId}`),
+  });
+  const attendance = useQuery({
+    queryKey: ["my-history", subjectId],
+    queryFn: () => api<{ records: { status: string }[] }>(`/attendance/my/records?subjectId=${encodeURIComponent(subjectId)}`),
+    enabled: me?.user.role === "student",
   });
   const name = subject.data?.subject.name || "Subject";
   const code = subject.data?.subject.code || subjectId;
+  const records = attendance.data?.records ?? [];
+  const present = records.filter((record) => record.status === "present").length;
+  const attendanceRate = records.length ? (present / records.length) * 100 : null;
+  const resourceCount = Number(subject.data?.subject.resource_count || 0);
   return (
     <AppShell>
       <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
@@ -38,32 +49,31 @@ function Subject() {
       <h1 className="rise mt-8 text-[26px] font-semibold leading-tight tracking-tight">{name}</h1>
       <p className="mt-1 text-sm text-muted-foreground">{code}{subject.isLoading ? " • Loading class details…" : ""}</p>
 
-      <div className="surface mt-6 rounded-[24px] p-5">
-        <div className="flex items-center justify-between text-sm"><span className="font-medium">Your progress</span><span className="font-semibold">72%</span></div>
-        <div className="mt-3"><Progress value={72} /></div>
-      </div>
+      {attendanceRate != null && (
+        <div className="surface mt-6 rounded-[24px] p-5">
+          <div className="flex items-center justify-between text-sm"><span className="font-medium">Attendance</span><span className="font-semibold">{attendanceRate.toFixed(1)}%</span></div>
+          <div className="mt-3"><Progress value={attendanceRate} /></div>
+          <p className="mt-2 text-xs text-muted-foreground">{present} of {records.length} sessions</p>
+        </div>
+      )}
 
       <SectionTitle>Coursework</SectionTitle>
       <div className="grid grid-cols-2 gap-3">
         <Link to="/resources" className="surface press rounded-[22px] p-4">
           <span className="grid h-10 w-10 place-items-center rounded-full bg-sky"><FolderOpen className="h-[18px] w-[18px]" /></span>
           <p className="mt-4 text-sm text-muted-foreground">Resources</p>
-          <p className="text-2xl font-semibold">24</p>
+          <p className="text-2xl font-semibold">{resourceCount}</p>
         </Link>
         <div className="surface rounded-[22px] p-4">
           <span className="grid h-10 w-10 place-items-center rounded-full bg-peach"><ClipboardList className="h-[18px] w-[18px]" /></span>
           <p className="mt-4 text-sm text-muted-foreground">Assignments</p>
-          <p className="text-2xl font-semibold">3</p>
+          <p className="mt-1 text-sm text-muted-foreground">No records yet</p>
         </div>
       </div>
 
       <SectionTitle>Assessment</SectionTitle>
       <div className="surface divide-y divide-border rounded-[24px]">
-        {[["Internal Test 1", 82], ["Quiz 1", 90], ["Assignment 1", 76]].map(([n, v]) => (
-          <div key={n} className="flex items-center justify-between p-4 text-sm">
-            <span>{n}</span><span className="font-semibold">{v}%</span>
-          </div>
-        ))}
+        <p className="p-4 text-sm text-muted-foreground">No assessment results have been published.</p>
       </div>
 
       <SectionTitle>AI Study</SectionTitle>

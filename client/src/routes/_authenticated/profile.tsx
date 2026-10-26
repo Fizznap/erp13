@@ -49,11 +49,11 @@ function Profile() {
       </AppShell>
     );
 
-  const studentId = me?.user.id ? me.user.id.substring(0, 8).toUpperCase() : "N/A";
+  const studentId = me?.user.profile?.rollNumber || me?.user.profile?.collegeId || "";
   const roleName =
     me?.user.role === "faculty" ? "Faculty" : me?.user.role === "admin" ? "Admin" : "Student";
   const verifyUrl =
-    typeof window !== "undefined" ? `${window.location.origin}/verify/${studentId}` : "";
+    typeof window !== "undefined" && studentId ? `${window.location.origin}/verify/${studentId}` : "";
   return (
     <AppShell>
       <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
@@ -64,7 +64,7 @@ function Profile() {
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <h1 className="truncate text-center text-base font-semibold">My Digital Student ID</h1>
+        <h1 className="truncate text-center text-base font-semibold">Digital ID</h1>
         <span className="h-11 w-11" />
       </header>
 
@@ -92,15 +92,13 @@ function Profile() {
               aria-hidden
               className="absolute -right-3 top-6 text-[64px] font-bold leading-none opacity-10"
             >
-              USTU
-              <br />
-              2026
+              ID
             </p>
             <div className="relative p-5">
               <p className="flex items-center gap-1.5 text-sm font-semibold">
                 <Spark className="text-primary" /> Snippet
               </p>
-              <p className="mt-1 text-[11px] opacity-70">University Campus</p>
+              <p className="mt-1 text-[11px] opacity-70">{me?.user.profile?.program || "Identity profile"}</p>
             </div>
             <div className="absolute inset-x-0 bottom-0 p-5">
               <p className="text-3xl font-bold uppercase leading-none tracking-tight">{me?.name}</p>
@@ -123,11 +121,13 @@ function Profile() {
                 </div>
               )}
             </div>
-            <p className="mt-4 font-mono text-xs tracking-wider opacity-80">{studentId}</p>
+            <p className="mt-4 font-mono text-xs tracking-wider opacity-80">{studentId || "ID not issued yet"}</p>
             <p className="mt-auto text-2xl font-bold uppercase tracking-tight">Scan me</p>
-            <span className="mt-1 rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground">
-              Valid till 06/2026
-            </span>
+            {me?.user.profile?.expectedGraduationYear && (
+              <span className="mt-1 rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground">
+                Expected graduation {me.user.profile.expectedGraduationYear}
+              </span>
+            )}
           </div>
         </button>
       </div>

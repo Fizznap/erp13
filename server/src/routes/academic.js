@@ -12,7 +12,7 @@ router.get('/hierarchy', authenticate, async (req, res) => {
     const divisions = await pool.query('SELECT * FROM divisions ORDER BY name');
     const semesters = await pool.query('SELECT * FROM semesters ORDER BY number');
     const subjects = await pool.query('SELECT * FROM subjects ORDER BY name');
-    const faculty = await pool.query("SELECT id, full_name, email FROM users WHERE role = 'faculty' AND is_active = true ORDER BY full_name");
+    const faculty = await pool.query("SELECT id, full_name, email, role FROM users WHERE role IN ('faculty', 'admin') AND is_active = true ORDER BY role, full_name");
     const classes = await pool.query(`
       SELECT ac.*, 
              br.name as branch_name, br.code as branch_code,
