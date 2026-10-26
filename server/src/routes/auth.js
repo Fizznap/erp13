@@ -476,7 +476,7 @@ router.post('/refresh', authLimiter, async (req, res) => {
     }
 
     const user = result.rows[0];
-    if (!isCollegeEmail(user.email)) {
+    if (!isCollegeEmail(user.email) && !(user.role === 'admin' && user.email.trim().toLowerCase() === configuredAdminEmail())) {
       return res.status(403).json({ error: 'This account is not eligible to sign in' });
     }
     if (!user.email_verified) {

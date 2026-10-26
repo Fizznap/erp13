@@ -2,6 +2,11 @@ const jwt = require('jsonwebtoken');
 const { pool } = require('../db/pool');
 const { isCollegeEmail } = require('../utils/collegeEmail');
 
+function isEligibleEmail(user) {
+  const configuredAdminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase() || 'smit2shinde2@gmail.com';
+  return isCollegeEmail(user.email) || (user.role === 'admin' && user.email.trim().toLowerCase() === configuredAdminEmail);
+}
+
 function isProfileComplete(user) {
   if (user.role !== 'student') return true;
   return Boolean(
@@ -57,7 +62,7 @@ function createAuthenticate({ allowOnboarding = false, requireOnboarding = false
       [decoded.id]
     );
     const user = result.rows[0];
-    if (!user || !user.is_active || !user.email_verified || !isCollegeEmail(user.email)) {
+     if (!user || !user.is_active || !user.email_verified || !isEligibleEmail(user)) {
       return res.status(401).json({ error: 'Account is not eligible to access Snippet' });
     }
     const profileComplete = isProfileComplete(user);
