@@ -99,7 +99,8 @@ async function ensureUser(client, { email, fullName, role }) {
 async function importStudents() {
   if (!ADMIN_EMAIL) throw new Error('ADMIN_EMAIL must be configured before importing the roster');
   if (!Number.isInteger(SEMESTER_NUMBER) || SEMESTER_NUMBER < 1) {
-    throw new Error('CURRENT_SEMESTER_NUMBER must be configured as a positive integer');
+    console.warn('CURRENT_SEMESTER_NUMBER is not configured; skipping roster import.');
+    return;
   }
   const subjectsToImport = configuredSubjects();
   const sourceRows = await fetchRoster();
