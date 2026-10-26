@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Spark } from "@/components/snippet/AppShell";
 import { SignInHelp } from "@/components/snippet/SignInHelp";
