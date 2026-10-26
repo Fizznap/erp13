@@ -68,17 +68,21 @@ router.get('/', authenticate, async (req, res) => {
         [req.user.id]
       );
     } else {
-      // Admin sees all offerings + subjects
+      // Admin sees every subject, including newly created subjects without an offering.
       result = await pool.query(
         `SELECT s.*, so.id AS offering_id, u.full_name AS faculty_name,
-                br.name AS branch_name, d.name AS division_name,
+                br.name AS branch_name, br.code AS branch_code,
+                d.name AS division_name, ba.start_year AS batch_start_year,
+                ba.end_year AS batch_end_year, sem.number AS semester_number,
                 (SELECT COUNT(*) FROM resources WHERE subject_offering_id = so.id) AS resource_count
-         FROM subject_offerings so
-         JOIN subjects s ON so.subject_id = s.id
-         JOIN users u ON u.id = so.faculty_id
-         JOIN academic_classes ac ON so.academic_class_id = ac.id
-         JOIN branches br ON ac.branch_id = br.id
-         JOIN divisions d ON ac.division_id = d.id
+         FROM subjects s
+         LEFT JOIN subject_offerings so ON so.subject_id = s.id
+         LEFT JOIN users u ON u.id = so.faculty_id
+         LEFT JOIN academic_classes ac ON so.academic_class_id = ac.id
+         LEFT JOIN branches br ON ac.branch_id = br.id
+         LEFT JOIN divisions d ON ac.division_id = d.id
+         LEFT JOIN batches ba ON ac.batch_id = ba.id
+         LEFT JOIN semesters sem ON ac.semester_id = sem.id
          ORDER BY s.name`
       );
     }

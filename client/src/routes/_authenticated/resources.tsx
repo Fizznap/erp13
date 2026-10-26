@@ -46,11 +46,15 @@ function Resources() {
     },
   });
 
+  const selectedSubject = subjectsQuery.data?.find((subject) => String(subject.offering_id || subject.id) === offeringId);
   const list = useQuery({
-    queryKey: ["resources", offeringId],
+    queryKey: ["resources", offeringId, selectedSubject?.offering_id],
     queryFn: async () => {
       if (!offeringId) return [];
-      const { resources } = await api<{ resources: any[] }>(`/resources?subjectOfferingId=${offeringId}`);
+      const parameter = selectedSubject?.offering_id
+        ? `subjectOfferingId=${selectedSubject.offering_id}`
+        : `subjectId=${offeringId}`;
+      const { resources } = await api<{ resources: any[] }>(`/resources?${parameter}`);
       return resources;
     },
     enabled: !!offeringId,
@@ -96,7 +100,7 @@ function Resources() {
         </select>
       ) : null}
 
-      {(me?.isFaculty || me?.isAdmin) && <UploadCard subjects={subjectsQuery.data || []} />}
+      {(me?.isFaculty || me?.isAdmin) && <UploadCard subjects={subjectsQuery.data || []} isAdmin={Boolean(me?.isAdmin)} />}
       
       <label className="glass mt-5 flex items-center gap-2 rounded-[20px] px-4 py-3">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by title…" className="min-w-0 flex-1 bg-transparent text-sm outline-hidden placeholder:text-muted-foreground" />
@@ -163,7 +167,7 @@ function DeleteBtn({ id }: { id: string }) {
 
 import { useEffect } from "react";
 
-function UploadCard({ subjects }: { subjects: any[] }) {
+function UploadCard({ subjects, isAdmin }: { subjects: any[]; isAdmin: boolean }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [offeringId, setOfferingId] = useState("");
@@ -172,6 +176,7 @@ function UploadCard({ subjects }: { subjects: any[] }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; t: string } | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [subjectMsg, setSubjectMsg] = useState("");
 
   const statusQ = useQuery({
     queryKey: ["resource-status", processingId],
@@ -231,6 +236,28 @@ function UploadCard({ subjects }: { subjects: any[] }) {
     }
   };
 
+  const createSubject = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const values = new FormData(form);
+    setSubjectMsg("");
+    try {
+      await api("/subjects", {
+        method: "POST",
+        body: {
+          name: values.get("name"),
+          code: values.get("code"),
+          description: values.get("description") || null,
+        },
+      });
+      await qc.invalidateQueries({ queryKey: ["subjects"] });
+      form.reset();
+      setSubjectMsg("Subject created. Choose it below to upload a file.");
+    } catch (err: any) {
+      setSubjectMsg(err.message || "Could not create subject");
+    }
+  };
+
   const isProcessing = !!processingId && !statusQ.data?.ready && !statusQ.data?.error;
   const progress = statusQ.data?.progress || (busy ? 5 : 0);
   const statusMessage = statusQ.data?.message || (busy ? "Uploading file..." : "");
@@ -252,6 +279,18 @@ function UploadCard({ subjects }: { subjects: any[] }) {
         </div>
       ) : (
         <>
+          {subjects.length === 0 && isAdmin && (
+            <div className="space-y-3 rounded-2xl border border-border bg-card p-4">
+              <p className="text-sm text-muted-foreground">Create a real subject before uploading its first resource.</p>
+              <form onSubmit={createSubject} className="space-y-2">
+                <input name="name" required placeholder="Subject name" className={input} />
+                <input name="code" required placeholder="Subject code" className={input} />
+                <input name="description" placeholder="Description (optional)" className={input} />
+                <button className="press w-full rounded-2xl bg-foreground py-3 text-sm font-semibold text-background">Create subject</button>
+              </form>
+              {subjectMsg && <p className="text-xs text-muted-foreground">{subjectMsg}</p>}
+            </div>
+          )}
           <select required value={offeringId} onChange={(e) => setOfferingId(e.target.value)} disabled={busy || subjects.length === 0} className={input}>
             {subjects.length === 0 ? (
               <option value="">No subjects available</option>
