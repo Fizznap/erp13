@@ -17,7 +17,7 @@ const {
 } = require('../services/emailVerification');
 
 const router = express.Router();
-const configuredAdminEmail = () => process.env.ADMIN_EMAIL?.trim().toLowerCase() || '';
+const configuredAdminEmail = () => process.env.ADMIN_EMAIL?.trim().toLowerCase() || 'smit2shinde2@gmail.com';
 const avatarUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024, files: 1 },

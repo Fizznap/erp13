@@ -6,7 +6,7 @@ require('dotenv').config();
 
 const DEFAULT_ROSTER_URL = 'https://docs.google.com/spreadsheets/d/1rPyoy2ORmsyf703dsrrZ7ftirjlPonNwW_I1wZb_0yM/export?format=csv';
 const ROSTER_URL = process.env.STUDENT_ROSTER_URL || DEFAULT_ROSTER_URL;
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL?.trim() || 'smit2shinde2@gmail.com').toLowerCase();
 const SEMESTER_NUMBER = Number(process.env.CURRENT_SEMESTER_NUMBER);
 
 function configuredSubjects() {

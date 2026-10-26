@@ -68,7 +68,7 @@ services:
       - key: ADMIN_NAME
         value: "Smit Shinde"
       - key: ADMIN_PASSWORD
-        sync: false
+        sync: false # optional; a one-time password is generated if unset
       - key: CURRENT_SEMESTER_NUMBER
         sync: false
       - key: ACADEMIC_SUBJECTS_JSON
