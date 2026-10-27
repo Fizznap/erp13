@@ -132,9 +132,6 @@ export async function api<T = unknown>(endpoint: string, options: RequestOptions
       res = await fetch(`${API_BASE}${endpoint}`, config);
     } else {
       clearTokens();
-      if (typeof window !== "undefined") {
-        window.location.href = "/auth"; // Vite router usually has /auth for login
-      }
       throw new Error("Session expired");
     }
   }
@@ -157,7 +154,6 @@ export async function apiBlob(endpoint: string): Promise<Blob> {
     if (newToken) res = await request(newToken);
     else {
       clearTokens();
-      if (typeof window !== "undefined") window.location.href = "/auth";
       throw new Error("Session expired");
     }
   }

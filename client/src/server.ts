@@ -2,6 +2,7 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import { isRedirect } from "@tanstack/react-router";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -51,6 +52,12 @@ export default {
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);
     } catch (error) {
+      if (error instanceof Response) {
+        return error;
+      }
+      if (isRedirect(error)) {
+        throw error;
+      }
       console.error(error);
       return new Response(renderErrorPage(), {
         status: 500,

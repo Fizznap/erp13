@@ -6,6 +6,7 @@ const apiLimiter = rateLimit({
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: false,
   message: { error: 'Too many requests, please try again later.' },
 });
 
@@ -15,6 +16,7 @@ const authLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: false,
   message: { error: 'Too many authentication attempts, please try again later.' },
 });
 
@@ -24,6 +26,7 @@ const ragLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: false,
   message: { error: 'Too many queries, please slow down.' },
 });
 

@@ -5,7 +5,7 @@ const path = require('path');
 const { apiLimiter } = require('./middleware/rateLimit');
 
 const app = express();
-app.set('trust proxy', 1); // Trust Render proxy to fix rate limits
+app.set('trust proxy', true); // Trust reverse proxies (Cloudflare + Render)
 const PORT = process.env.PORT || 3001;
 
 // CORS — support multiple origins for Vercel production + preview URLs
