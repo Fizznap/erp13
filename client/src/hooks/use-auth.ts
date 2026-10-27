@@ -4,6 +4,8 @@ import { api, clearTokens } from "@/lib/api";
 
 export type StudentProfile = {
   googlePictureUrl: string | null;
+  hasUploadedPhoto?: boolean;
+  avatarUpdatedAt?: string | null;
   preferredName: string | null;
   collegeId: string | null;
   program: string | null;
@@ -67,8 +69,10 @@ export function useMe() {
         isFaculty,
         isAdmin,
         needsSetup: Boolean(data.requiresOnboarding),
-        avatar: user.profile?.googlePictureUrl || null,
-        subtitle: isFaculty ? "Faculty" : "Student",
+        avatar: user.profile?.hasUploadedPhoto
+          ? `snippet-upload:${user.profile.avatarUpdatedAt || "latest"}`
+          : user.profile?.googlePictureUrl || null,
+          subtitle: isFaculty ? "Faculty" : "Student",
       });
     } catch (err) {
       setMe(null);

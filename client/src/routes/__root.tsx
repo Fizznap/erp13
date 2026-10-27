@@ -78,7 +78,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
-      { title: "Snippet" },
+      { title: "Snippet — College ERP with AI built in" },
+      { property: "og:title", content: "Snippet — College ERP with AI built in" },
+      { property: "og:description", content: "Classes, attendance, resources and results in one place, with an AI study assistant." },
       { name: "description", content: "College ERP with AI built in" },
       { name: "author", content: "Lovable" },
             { property: "og:type", content: "website" },
@@ -117,6 +119,9 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  useEffect(() => {
+    void import("@/lib/firebase-analytics").then((m) => m.startFirebaseAnalytics());
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

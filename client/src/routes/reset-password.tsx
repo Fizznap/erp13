@@ -19,7 +19,10 @@ export const Route = createFileRoute("/reset-password")({
 
 function ResetPassword() {
   const navigate = useNavigate();
-  const resetToken = new URLSearchParams(window.location.search).get("resetToken") || "";
+  const resetToken =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("resetToken") || ""
+      : "";
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);

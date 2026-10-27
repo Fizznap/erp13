@@ -49,7 +49,7 @@ function Verify() {
         ) : (
           <div className="surface mt-8 rounded-[26px] p-6 text-center">
             <XCircle className="mx-auto h-10 w-10 text-destructive" />
-            <p className="mt-3 font-semibold">No student found</p>
+            <h1 className="mt-3 text-lg font-semibold">No student found</h1>
             <p className="mt-1 text-sm text-muted-foreground">This ID isn't registered with Snippet.</p>
           </div>
         )}

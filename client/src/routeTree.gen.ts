@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as CompleteProfileRouteImport } from './routes/complete-profile'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as AuthenticatedAskRouteImport } from './routes/_authenticated/ask'
@@ -22,7 +24,9 @@ import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authentic
 import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated/profile'
 import { Route as AuthenticatedRemindersRouteImport } from './routes/_authenticated/reminders'
 import { Route as AuthenticatedResourcesRouteImport } from './routes/_authenticated/resources'
+import { Route as AuthenticatedSubjectsRouteImport } from './routes/_authenticated/subjects'
 import { Route as VerifyStudentNoRouteImport } from './routes/verify.$studentNo'
+import { Route as AuthenticatedSubjectsIndexRouteImport } from './routes/_authenticated/subjects.index'
 import { Route as AuthenticatedSubjectsSubjectIdRouteImport } from './routes/_authenticated/subjects.$subjectId'
 
 const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
@@ -37,6 +41,16 @@ const AuthRoute = AuthRouteImport.update({
 const CompleteProfileRoute = CompleteProfileRouteImport.update({
   id: '/complete-profile',
   path: '/complete-profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
@@ -89,22 +103,35 @@ const AuthenticatedResourcesRoute = AuthenticatedResourcesRouteImport.update({
   path: '/resources',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedSubjectsRoute = AuthenticatedSubjectsRouteImport.update({
+  id: '/subjects',
+  path: '/subjects',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const VerifyStudentNoRoute = VerifyStudentNoRouteImport.update({
   id: '/verify/$studentNo',
   path: '/verify/$studentNo',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedSubjectsIndexRoute =
+  AuthenticatedSubjectsIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedSubjectsRoute,
+  } as any)
 const AuthenticatedSubjectsSubjectIdRoute =
   AuthenticatedSubjectsSubjectIdRouteImport.update({
-    id: '/subjects/$subjectId',
-    path: '/subjects/$subjectId',
-    getParentRoute: () => AuthenticatedRouteRoute,
+    id: '/$subjectId',
+    path: '/$subjectId',
+    getParentRoute: () => AuthenticatedSubjectsRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/auth': typeof AuthRoute
   '/complete-profile': typeof CompleteProfileRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/ask': typeof AuthenticatedAskRoute
   '/attendance': typeof AuthenticatedAttendanceRoute
@@ -114,12 +141,16 @@ export interface FileRoutesByFullPath {
   '/profile': typeof AuthenticatedProfileRoute
   '/reminders': typeof AuthenticatedRemindersRoute
   '/resources': typeof AuthenticatedResourcesRoute
+  '/subjects': typeof AuthenticatedSubjectsRouteWithChildren
   '/verify/$studentNo': typeof VerifyStudentNoRoute
   '/subjects/$subjectId': typeof AuthenticatedSubjectsSubjectIdRoute
+  '/subjects/': typeof AuthenticatedSubjectsIndexRoute
 }
 export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/complete-profile': typeof CompleteProfileRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/ask': typeof AuthenticatedAskRoute
   '/attendance': typeof AuthenticatedAttendanceRoute
@@ -132,12 +163,15 @@ export interface FileRoutesByTo {
   '/verify/$studentNo': typeof VerifyStudentNoRoute
   '/': typeof AuthenticatedIndexRoute
   '/subjects/$subjectId': typeof AuthenticatedSubjectsSubjectIdRoute
+  '/subjects': typeof AuthenticatedSubjectsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/complete-profile': typeof CompleteProfileRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
   '/_authenticated/ask': typeof AuthenticatedAskRoute
   '/_authenticated/attendance': typeof AuthenticatedAttendanceRoute
@@ -147,9 +181,11 @@ export interface FileRoutesById {
   '/_authenticated/profile': typeof AuthenticatedProfileRoute
   '/_authenticated/reminders': typeof AuthenticatedRemindersRoute
   '/_authenticated/resources': typeof AuthenticatedResourcesRoute
+  '/_authenticated/subjects': typeof AuthenticatedSubjectsRouteWithChildren
   '/verify/$studentNo': typeof VerifyStudentNoRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/subjects/$subjectId': typeof AuthenticatedSubjectsSubjectIdRoute
+  '/_authenticated/subjects/': typeof AuthenticatedSubjectsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -157,6 +193,8 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/complete-profile'
+    | '/forgot-password'
+    | '/reset-password'
     | '/admin'
     | '/ask'
     | '/attendance'
@@ -166,12 +204,16 @@ export interface FileRouteTypes {
     | '/profile'
     | '/reminders'
     | '/resources'
+    | '/subjects'
     | '/verify/$studentNo'
     | '/subjects/$subjectId'
+    | '/subjects/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/auth'
     | '/complete-profile'
+    | '/forgot-password'
+    | '/reset-password'
     | '/admin'
     | '/ask'
     | '/attendance'
@@ -184,11 +226,14 @@ export interface FileRouteTypes {
     | '/verify/$studentNo'
     | '/'
     | '/subjects/$subjectId'
+    | '/subjects'
   id:
     | '__root__'
     | '/_authenticated'
     | '/auth'
     | '/complete-profile'
+    | '/forgot-password'
+    | '/reset-password'
     | '/_authenticated/admin'
     | '/_authenticated/ask'
     | '/_authenticated/attendance'
@@ -198,15 +243,19 @@ export interface FileRouteTypes {
     | '/_authenticated/profile'
     | '/_authenticated/reminders'
     | '/_authenticated/resources'
+    | '/_authenticated/subjects'
     | '/verify/$studentNo'
     | '/_authenticated/'
     | '/_authenticated/subjects/$subjectId'
+    | '/_authenticated/subjects/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   CompleteProfileRoute: typeof CompleteProfileRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   VerifyStudentNoRoute: typeof VerifyStudentNoRoute
 }
 
@@ -231,6 +280,20 @@ declare module '@tanstack/react-router' {
       path: '/complete-profile'
       fullPath: '/complete-profile'
       preLoaderRoute: typeof CompleteProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/': {
@@ -303,6 +366,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedResourcesRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/subjects': {
+      id: '/_authenticated/subjects'
+      path: '/subjects'
+      fullPath: '/subjects'
+      preLoaderRoute: typeof AuthenticatedSubjectsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/verify/$studentNo': {
       id: '/verify/$studentNo'
       path: '/verify/$studentNo'
@@ -310,15 +380,37 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VerifyStudentNoRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/subjects/': {
+      id: '/_authenticated/subjects/'
+      path: '/'
+      fullPath: '/subjects/'
+      preLoaderRoute: typeof AuthenticatedSubjectsIndexRouteImport
+      parentRoute: typeof AuthenticatedSubjectsRoute
+    }
     '/_authenticated/subjects/$subjectId': {
       id: '/_authenticated/subjects/$subjectId'
-      path: '/subjects/$subjectId'
+      path: '/$subjectId'
       fullPath: '/subjects/$subjectId'
       preLoaderRoute: typeof AuthenticatedSubjectsSubjectIdRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
+      parentRoute: typeof AuthenticatedSubjectsRoute
     }
   }
 }
+
+interface AuthenticatedSubjectsRouteChildren {
+  AuthenticatedSubjectsSubjectIdRoute: typeof AuthenticatedSubjectsSubjectIdRoute
+  AuthenticatedSubjectsIndexRoute: typeof AuthenticatedSubjectsIndexRoute
+}
+
+const AuthenticatedSubjectsRouteChildren: AuthenticatedSubjectsRouteChildren = {
+  AuthenticatedSubjectsSubjectIdRoute: AuthenticatedSubjectsSubjectIdRoute,
+  AuthenticatedSubjectsIndexRoute: AuthenticatedSubjectsIndexRoute,
+}
+
+const AuthenticatedSubjectsRouteWithChildren =
+  AuthenticatedSubjectsRoute._addFileChildren(
+    AuthenticatedSubjectsRouteChildren,
+  )
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAdminRoute: typeof AuthenticatedAdminRoute
@@ -330,8 +422,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedProfileRoute: typeof AuthenticatedProfileRoute
   AuthenticatedRemindersRoute: typeof AuthenticatedRemindersRoute
   AuthenticatedResourcesRoute: typeof AuthenticatedResourcesRoute
+  AuthenticatedSubjectsRoute: typeof AuthenticatedSubjectsRouteWithChildren
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
-  AuthenticatedSubjectsSubjectIdRoute: typeof AuthenticatedSubjectsSubjectIdRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -344,8 +436,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedProfileRoute: AuthenticatedProfileRoute,
   AuthenticatedRemindersRoute: AuthenticatedRemindersRoute,
   AuthenticatedResourcesRoute: AuthenticatedResourcesRoute,
+  AuthenticatedSubjectsRoute: AuthenticatedSubjectsRouteWithChildren,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
-  AuthenticatedSubjectsSubjectIdRoute: AuthenticatedSubjectsSubjectIdRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
@@ -355,6 +447,8 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   CompleteProfileRoute: CompleteProfileRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   VerifyStudentNoRoute: VerifyStudentNoRoute,
 }
 export const routeTree = rootRouteImport

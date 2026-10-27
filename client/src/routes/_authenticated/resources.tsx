@@ -264,7 +264,7 @@ function UploadCard({ subjects, isAdmin }: { subjects: any[]; isAdmin: boolean }
   
   const input = "w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-hidden focus:border-primary disabled:opacity-50";
   return (
-    <form onSubmit={submit} className="surface mt-5 space-y-3 rounded-[24px] p-4">
+    <div className="surface mt-5 space-y-3 rounded-[24px] p-4">
       <p className="flex items-center gap-2 font-semibold"><Upload className="h-4 w-4" /> Upload a resource</p>
       
       {isProcessing ? (
@@ -291,7 +291,8 @@ function UploadCard({ subjects, isAdmin }: { subjects: any[]; isAdmin: boolean }
               {subjectMsg && <p className="text-xs text-muted-foreground">{subjectMsg}</p>}
             </div>
           )}
-          <select required value={offeringId} onChange={(e) => setOfferingId(e.target.value)} disabled={busy || subjects.length === 0} className={input}>
+          <form id="upload-resource-form" onSubmit={submit} className="space-y-3">
+            <select required value={offeringId} onChange={(e) => setOfferingId(e.target.value)} disabled={busy || subjects.length === 0} className={input}>
             {subjects.length === 0 ? (
               <option value="">No subjects available</option>
             ) : (
@@ -303,16 +304,17 @@ function UploadCard({ subjects, isAdmin }: { subjects: any[]; isAdmin: boolean }
             {KINDS.map((k) => <button type="button" disabled={busy} key={k} onClick={() => setKind(k)} className={`press shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium disabled:opacity-50 ${kind === k ? "bg-foreground text-background" : "border border-border bg-card"}`}>{k}</button>)}
           </div>
           <input ref={fileRef} disabled={busy || subjects.length === 0} required accept="application/pdf" type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-sm file:mr-3 file:rounded-full file:border-0 file:bg-accent file:px-4 file:py-2 file:text-sm file:font-medium disabled:opacity-50" />
+          </form>
         </>
       )}
 
       {msg && <p className={`text-xs font-medium ${msg.ok ? "text-primary-deep" : "text-destructive"}`}>{msg.t}</p>}
       
       {!isProcessing && (
-        <button disabled={busy || !file || !offeringId} className="press w-full rounded-2xl bg-ai py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40">
+        <button form="upload-resource-form" type="submit" disabled={busy || !file || !offeringId} className="press w-full rounded-2xl bg-ai py-3 text-sm font-semibold text-primary-foreground disabled:opacity-40">
           {busy ? "Uploading…" : "Upload"}
         </button>
       )}
-    </form>
+    </div>
   );
 }

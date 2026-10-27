@@ -23,3 +23,5 @@
 - Resource access: resources must carry a section_id; RLS (is_section_member) limits reads to that class, and storage reads require a readable resources row — any future AI retrieval must query through these policies before searching.
 - Face ID: only enrollment consent/status is stored (face_enrollments); no images are saved. Real matching plugs in later behind request_face_enrollment.
 - Ask Snippet: browser calls server fn askSnippet, which resolves the caller's allowed sections/resources via RLS and forwards only those IDs + the question to the external Snippet RAG backend with a server-held key — the backend never trusts browser-supplied scope.
+- Firebase is additive only: Cloud stays the sole identity and system of record (sign-in, attendance, classes, files); Firebase may only carry push delivery, usage analytics and brand-new data types, and must never gate or mirror an existing RLS-protected read or write.
+

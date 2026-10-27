@@ -20,10 +20,17 @@ type Profile = {
   linkedinUrl?: string | null;
   githubUrl?: string | null;
   portfolioUrl?: string | null;
+  academicLabGroupId?: string | null;
+  labGroupName?: string | null;
+  branchCode?: string | null;
+  divisionName?: string | null;
 };
 type User = { id: string; email: string; fullName: string; role: string; profile?: Profile };
 type ClassOption = {
   id: string;
+  branch_id: string;
+  batch_id: string;
+  division_id: string;
   branch_name: string;
   branch_code: string;
   start_year: number;
@@ -31,12 +38,21 @@ type ClassOption = {
   division_name: string;
   semester_number: number;
 };
+type LabGroupOption = {
+  id: string;
+  branch_id: string;
+  batch_id: string;
+  division_id: string;
+  name: string;
+};
 type FormKey =
   | "preferredName"
   | "rollNumber"
   | "yearOfStudy"
   | "expectedGraduationYear"
-  | "academicClassId"
+  | "academicBranchId"
+  | "academicDivisionId"
+  | "academicLabGroupId"
   | "phone"
   | "bio"
   | "skills"
@@ -56,7 +72,7 @@ function getRollDetails(value: string) {
       ? { code: "BTECH-AIML", name: "B.Tech Artificial Intelligence and Machine Learning" }
       : prefix === "0102"
         ? { code: "BTECH-CSE", name: "B.Tech Computer Science and Engineering" }
-        : { code: "BTECH-CYS", name: "B.Tech Cyber Security" };
+        : { code: "BTECH-CYS", name: "B.Tech Cyber Security and Digital Forensics" };
   return { admissionYear: 2000 + Number(match[1]), branch };
 }
 
@@ -67,6 +83,13 @@ function canonicalBranchCode(code: string) {
   if (["BTECH-CYS", "CYS", "CSDF", "CYBER", "CYBER-SECURITY"].includes(normalized))
     return "BTECH-CYS";
   return null;
+}
+
+function branchLabel(code: string) {
+  const canonical = canonicalBranchCode(code);
+  if (canonical === "BTECH-AIML") return "AIML";
+  if (canonical === "BTECH-CSE") return "CSE";
+  return "Cyber Security";
 }
 
 export const Route = createFileRoute("/complete-profile")({
@@ -87,6 +110,7 @@ function CompleteProfile() {
   const [step, setStep] = useState(0);
   const [user, setUser] = useState<User | null>(null);
   const [classes, setClasses] = useState<ClassOption[]>([]);
+  const [labGroups, setLabGroups] = useState<LabGroupOption[]>([]);
   const [values, setValues] = useState<FormValues>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -96,7 +120,7 @@ function CompleteProfile() {
     let alive = true;
     Promise.all([
       api<{ user: User; requiresOnboarding: boolean }>("/auth/me"),
-      api<{ classes: ClassOption[] }>("/auth/onboarding/options"),
+      api<{ classes: ClassOption[]; labGroups: LabGroupOption[] }>("/auth/onboarding/options"),
     ])
       .then(([me, options]) => {
         if (!alive) return;
@@ -106,6 +130,7 @@ function CompleteProfile() {
         }
         setUser(me.user);
         setClasses(options.classes);
+        setLabGroups(options.labGroups);
         const profile = me.user.profile || {};
         setValues({
           preferredName: profile.preferredName || me.user.fullName || "",
@@ -114,7 +139,15 @@ function CompleteProfile() {
           expectedGraduationYear: profile.expectedGraduationYear
             ? String(profile.expectedGraduationYear)
             : "",
-          academicClassId: "",
+          academicBranchId: options.classes.find(
+            (item) => canonicalBranchCode(item.branch_code) === canonicalBranchCode(profile.branchCode || "") &&
+              Number(item.start_year) === Number(profile.admissionYear),
+          )?.branch_id || "",
+          academicDivisionId: options.classes.find(
+            (item) => canonicalBranchCode(item.branch_code) === canonicalBranchCode(profile.branchCode || "") &&
+              Number(item.start_year) === Number(profile.admissionYear) && item.division_name === profile.divisionName,
+          )?.division_id || "",
+          academicLabGroupId: profile.academicLabGroupId || "",
           phone: profile.phone || "",
           bio: profile.bio || "",
           skills: (profile.skills || []).join(", "),
@@ -137,20 +170,46 @@ function CompleteProfile() {
     };
   }, [navigate]);
 
-  const selectedClass = useMemo(
-    () => classes.find((item) => item.id === values.academicClassId),
-    [classes, values.academicClassId],
-  );
   const rollDetails = useMemo(() => getRollDetails(values.rollNumber || ""), [values.rollNumber]);
+  const availableBranches = useMemo(() => {
+    const byId = new Map<string, ClassOption>();
+    for (const item of classes) {
+      if (rollDetails && Number(item.start_year) === rollDetails.admissionYear) byId.set(item.branch_id, item);
+    }
+    return [...byId.values()].sort((a, b) => a.branch_name.localeCompare(b.branch_name));
+  }, [classes, rollDetails]);
+  const selectedBranch = availableBranches.find((item) => item.branch_id === values.academicBranchId);
+  const availableDivisions = useMemo(() => {
+    const byId = new Map<string, ClassOption>();
+    for (const item of classes) {
+      if (item.branch_id === values.academicBranchId && rollDetails && Number(item.start_year) === rollDetails.admissionYear)
+        byId.set(item.division_id, item);
+    }
+    return [...byId.values()].sort((a, b) => a.division_name.localeCompare(b.division_name));
+  }, [classes, rollDetails, values.academicBranchId]);
   const matchingClasses = useMemo(
     () =>
       classes.filter(
         (item) =>
-          rollDetails &&
-          canonicalBranchCode(item.branch_code) === rollDetails.branch.code &&
-          Number(item.start_year) === rollDetails.admissionYear,
+          values.academicBranchId && values.academicDivisionId && rollDetails &&
+          item.branch_id === values.academicBranchId && item.division_id === values.academicDivisionId &&
+          Number(item.start_year) === rollDetails.admissionYear &&
+          Number(values.yearOfStudy) >= 1 &&
+          Number(item.semester_number) === (Number(values.yearOfStudy) - 1) * 2 + 1,
       ),
-    [classes, rollDetails],
+    [classes, rollDetails, values.academicBranchId, values.academicDivisionId, values.yearOfStudy],
+  );
+  const selectedClass = matchingClasses[0];
+  const matchingLabGroups = useMemo(
+    () =>
+      labGroups.filter(
+        (group) =>
+          selectedClass &&
+          group.branch_id === selectedClass.branch_id &&
+          group.batch_id === selectedClass.batch_id &&
+          group.division_id === selectedClass.division_id,
+      ),
+    [labGroups, selectedClass],
   );
   const update = (key: FormKey, value: string) =>
     setValues((current) => ({ ...current, [key]: value }));
@@ -181,7 +240,12 @@ function CompleteProfile() {
       (!rollDetails ||
         !values.yearOfStudy ||
         !values.expectedGraduationYear ||
-        !values.academicClassId)
+        !values.academicBranchId ||
+        !values.academicDivisionId ||
+        !selectedClass ||
+        !rollDetails || canonicalBranchCode(selectedBranch?.branch_code || "") !== rollDetails.branch.code ||
+        !values.academicLabGroupId ||
+        !matchingLabGroups.some((group) => group.id === values.academicLabGroupId))
     ) {
       setError("Complete all required academic fields before continuing.");
       return false;
@@ -221,7 +285,10 @@ function CompleteProfile() {
           rollNumber: values.rollNumber,
           yearOfStudy: Number(values.yearOfStudy),
           expectedGraduationYear: Number(values.expectedGraduationYear),
-          academicClassId: values.academicClassId,
+          academicClassId: selectedClass?.id,
+          academicBranchId: values.academicBranchId,
+          academicDivisionId: values.academicDivisionId,
+          academicLabGroupId: values.academicLabGroupId,
           phone: values.phone,
           bio: values.bio,
           skills: list("skills"),
@@ -302,8 +369,8 @@ function CompleteProfile() {
                 <input className={`${inputClass} opacity-70`} value={user.email} readOnly />
               </label>
               <p className="text-xs text-muted-foreground">
-                Your Google profile photo is used when available. Profile photo uploads are not
-                enabled yet.
+                Your Google photo is used if available. You can upload or change your photo later
+                from your profile.
               </p>
             </>
           )}
@@ -320,7 +387,9 @@ function CompleteProfile() {
                     setValues((current) => ({
                       ...current,
                       rollNumber: e.target.value,
-                      academicClassId: "",
+                      academicBranchId: "",
+                      academicDivisionId: "",
+                      academicLabGroupId: "",
                     }))
                   }
                 />
@@ -353,25 +422,76 @@ function CompleteProfile() {
               </label>
               {field("expectedGraduationYear", "Expected graduation year", true, "number")}
               <label className="block">
-                <span className={labelClass}>Class, division and semester *</span>
+                <span className={labelClass}>Branch *</span>
                 <select
                   className={inputClass}
                   required
-                  value={values.academicClassId || ""}
-                  onChange={(e) => update("academicClassId", e.target.value)}
+                  value={values.academicBranchId || ""}
+                  onChange={(e) =>
+                    setValues((current) => ({
+                      ...current,
+                      academicBranchId: e.target.value,
+                      academicDivisionId: "",
+                      academicLabGroupId: "",
+                    }))
+                  }
                   disabled={!rollDetails}
                 >
+                  <option value="">{rollDetails ? "Select your branch" : "Enter a valid roll number first"}</option>
+                  {availableBranches.map((item) => (
+                    <option key={item.branch_id} value={item.branch_id}>
+                      {branchLabel(item.branch_code)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className={labelClass}>Division *</span>
+                <select
+                  className={inputClass}
+                  required
+                  value={values.academicDivisionId || ""}
+                  onChange={(e) => setValues((current) => ({
+                    ...current,
+                    academicDivisionId: e.target.value,
+                    academicLabGroupId: "",
+                  }))}
+                  disabled={!values.academicBranchId}
+                >
+                  <option value="">{values.academicBranchId ? "Select your division" : "Select your branch first"}</option>
+                  {availableDivisions.map((item) => (
+                    <option key={item.division_id} value={item.division_id}>{item.division_name} Division</option>
+                  ))}
+                </select>
+              </label>
+              {selectedClass && (
+                <p className="text-xs text-muted-foreground">
+                  You’ll be added to {selectedBranch?.branch_name} · {selectedClass.division_name} Division · Semester {selectedClass.semester_number}.
+                </p>
+              )}
+              {selectedBranch && rollDetails && canonicalBranchCode(selectedBranch.branch_code) !== rollDetails.branch.code && (
+                <p className="text-xs text-destructive">The selected branch does not match the branch encoded in your roll number.</p>
+              )}
+              <label className="block">
+                <span className={labelClass}>Lab attendance group *</span>
+                <select
+                  className={inputClass}
+                  required
+                  value={values.academicLabGroupId || ""}
+                  onChange={(e) => update("academicLabGroupId", e.target.value)}
+                  disabled={!selectedClass || matchingLabGroups.length === 0}
+                >
                   <option value="">
-                    {!rollDetails
-                      ? "Enter a valid roll number first"
-                      : matchingClasses.length
-                        ? "Select your configured class"
-                        : "No classes configured for this branch and batch"}
+                    {!selectedClass
+                      ? "Select your division first"
+                      : matchingLabGroups.length
+                        ? "Select your lab group"
+                        : "No lab groups configured for this division"}
                   </option>
-                  {matchingClasses.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.branch_name} ({item.branch_code}) · {item.start_year}–{item.end_year} ·{" "}
-                      {item.division_name} · Semester {item.semester_number}
+                  {matchingLabGroups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {selectedClass?.branch_code} {selectedClass?.division_name}
+                      {group.name}
                     </option>
                   ))}
                 </select>
@@ -382,10 +502,16 @@ function CompleteProfile() {
                   match the branch and batch from your roll number.
                 </p>
               )}
-              {rollDetails && matchingClasses.length === 0 && (
+              {rollDetails && values.academicBranchId && values.academicDivisionId && values.yearOfStudy && matchingClasses.length === 0 && (
                 <p className="text-xs text-destructive">
                   Ask an administrator to configure academic classes for this branch and admission
                   batch before completing registration.
+                </p>
+              )}
+              {selectedClass && matchingLabGroups.length === 0 && (
+                <p className="text-xs text-destructive">
+                  Ask an administrator to configure lab groups for this branch, batch, and division
+                  before completing registration.
                 </p>
               )}
             </>
@@ -433,14 +559,19 @@ function CompleteProfile() {
                 {rollDetails?.admissionYear || "—"} / {values.expectedGraduationYear}
               </p>
               <p>
+                <strong>Lab group:</strong>{" "}
+                {matchingLabGroups.find((group) => group.id === values.academicLabGroupId)?.name ||
+                  "—"}
+              </p>
+              <p>
                 <strong>Class:</strong>{" "}
                 {selectedClass
-                  ? `${selectedClass.start_year}–${selectedClass.end_year}, ${selectedClass.division_name}, semester ${selectedClass.semester_number}`
+                  ? `${selectedBranch?.branch_name}, ${selectedClass.division_name} Division, semester ${selectedClass.semester_number}`
                   : "—"}
               </p>
               <p className="pt-2 text-xs text-muted-foreground">
-                You can edit optional profile details later. Your email, role, and class assignment
-                are controlled by account and academic records.
+                You can edit optional profile details later. Your email, role, class assignment, and
+                lab group are controlled by account and academic records.
               </p>
             </div>
           )}

@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { SnippetUser } from "@/hooks/use-auth";
+import { useAvatarUrl } from "@/lib/avatar";
+import { Camera, Trash2 } from "lucide-react";
 
 export function ProfileForm({
   user,
@@ -10,8 +12,56 @@ export function ProfileForm({
   onSaved?: () => Promise<void>;
 }) {
   const [loading, setLoading] = useState(false);
+  const [photoLoading, setPhotoLoading] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
   const profile = user?.profile;
+  const photoPath = profile?.hasUploadedPhoto
+    ? `snippet-upload:${profile.avatarUpdatedAt || "latest"}`
+    : profile?.googlePictureUrl;
+  const photoUrl = useAvatarUrl(photoPath);
+
+  useEffect(() => () => {
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+  }, [photoPreview]);
+
+  const uploadPhoto = async (file?: File) => {
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setMsg("Choose an image that is 2 MB or smaller.");
+      return;
+    }
+    setPhotoLoading(true);
+    setMsg("");
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      await api("/auth/avatar", { method: "PUT", body });
+      setPhotoPreview(null);
+      await onSaved?.();
+      setMsg("Profile photo updated.");
+    } catch (err: unknown) {
+      setPhotoPreview(null);
+      setMsg(err instanceof Error ? err.message : "Could not upload profile photo");
+    } finally {
+      setPhotoLoading(false);
+    }
+  };
+
+  const removePhoto = async () => {
+    setPhotoLoading(true);
+    setMsg("");
+    try {
+      await api("/auth/avatar", { method: "DELETE" });
+      setPhotoPreview(null);
+      await onSaved?.();
+      setMsg("Uploaded photo removed.");
+    } catch (err: unknown) {
+      setMsg(err instanceof Error ? err.message : "Could not remove profile photo");
+    } finally {
+      setPhotoLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -72,6 +122,50 @@ export function ProfileForm({
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <div className="flex items-center gap-4 rounded-2xl bg-muted/40 p-4">
+        {photoPreview || photoUrl ? (
+          <img
+            src={photoPreview || photoUrl || undefined}
+            alt="Profile"
+            className="h-16 w-16 rounded-full object-cover"
+          />
+        ) : (
+          <div className="grid h-16 w-16 place-items-center rounded-full bg-muted text-muted-foreground">
+            <Camera className="h-6 w-6" />
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">Profile photo</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">JPEG, PNG, or WebP · up to 2 MB</p>
+          <label className="press mt-2 inline-flex cursor-pointer items-center rounded-full bg-card px-3 py-1.5 text-xs font-semibold">
+            {photoLoading ? "Saving…" : "Upload photo"}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="sr-only"
+              disabled={photoLoading}
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                if (file) {
+                  setPhotoPreview(URL.createObjectURL(file));
+                  void uploadPhoto(file);
+                }
+                event.currentTarget.value = "";
+              }}
+            />
+          </label>
+          {profile?.hasUploadedPhoto && (
+            <button
+              type="button"
+              disabled={photoLoading}
+              onClick={removePhoto}
+              className="ml-2 inline-flex items-center gap-1 rounded-full px-2 py-1.5 text-xs text-muted-foreground disabled:opacity-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Remove
+            </button>
+          )}
+        </div>
+      </div>
       {msg && (
         <div role="status" className="text-sm text-primary-deep">
           {msg}

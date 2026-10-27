@@ -30,7 +30,7 @@ function Subject() {
   const attendance = useQuery({
     queryKey: ["my-history", subjectId],
     queryFn: () => api<{ records: { status: string }[] }>(`/attendance/my/records?subjectId=${encodeURIComponent(subjectId)}`),
-    enabled: me?.user.role === "student",
+    enabled: me?.user?.role === "student",
   });
   const name = subject.data?.subject.name || "Subject";
   const code = subject.data?.subject.code || subjectId;

@@ -4,3 +4,6 @@
 - [ ] Phase 3: voice and photo questions in Ask Snippet
 - [ ] Face matching — blocked: needs a face-verification provider
 - [ ] Location check at attendance
+- [x] Firebase analytics (project snippet-9b16f)
+- [ ] Firebase push notifications — blocked: needs VAPID key + service account via connector card
+

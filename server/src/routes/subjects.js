@@ -159,7 +159,7 @@ router.get('/:id', authenticate, async (req, res) => {
        LEFT JOIN divisions d ON d.id = ac.division_id
        LEFT JOIN batches ba ON ba.id = ac.batch_id
        LEFT JOIN semesters sem ON sem.id = ac.semester_id
-       WHERE s.id = $1
+       WHERE s.id = $1 OR so.id = $1
        ORDER BY sem.number DESC NULLS LAST
        LIMIT 1`,
       [req.params.id]

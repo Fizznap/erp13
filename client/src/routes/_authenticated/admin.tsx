@@ -10,6 +10,8 @@ export const Route = createFileRoute("/_authenticated/admin")({
   head: () => ({
     meta: [
       { title: "Admin — Snippet" },
+      { property: "og:title", content: "Admin — Snippet" },
+      { property: "og:description", content: "Approve faculty and manage branches, batches, divisions and subjects." },
       { name: "description", content: "Approve or reject faculty access requests." },
     ],
   }),
