@@ -1,9 +1,12 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { api } from "@/lib/api";
+import { api, clearTokens } from "@/lib/api";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
   beforeLoad: async () => {
+    if (typeof window === "undefined") {
+      return {};
+    }
     const token = localStorage.getItem("snippet_token");
     if (!token) throw redirect({ to: "/auth" });
     let data: { user: { id: string; email: string; role: string }; requiresOnboarding?: boolean };
@@ -13,6 +16,7 @@ export const Route = createFileRoute("/_authenticated")({
         requiresOnboarding?: boolean;
       }>("/auth/me");
     } catch {
+      clearTokens();
       throw redirect({ to: "/auth" });
     }
     if (data.requiresOnboarding) throw redirect({ to: "/complete-profile" });

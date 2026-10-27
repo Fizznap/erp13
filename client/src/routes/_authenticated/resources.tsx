@@ -4,7 +4,7 @@ import { Search, FileText, Presentation, NotebookPen, File, Trash2, Upload, Down
 import { useRef, useState } from "react";
 import { AppShell } from "@/components/snippet/AppShell";
 import { useMe } from "@/hooks/use-auth";
-import { api } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 
 export const Route = createFileRoute("/_authenticated/resources")({
   head: () => ({
@@ -63,7 +63,7 @@ function Resources() {
   const items = (list.data ?? []).filter((i) => (f === "All" || i.kind === f) && `${i.filename} ${i.original_name}`.toLowerCase().includes(q.toLowerCase()));
 
   const open = async (id: string) => {
-    const API_BASE = (import.meta.env as any).VITE_API_URL || 'http://localhost:3001/api';
+
     const token = localStorage.getItem('snippet_token');
     
     // Quick hack to download using a fetch so we can pass auth headers, 

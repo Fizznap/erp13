@@ -1,13 +1,19 @@
 const VITE_API_URL = import.meta.env["VITE_API_URL"] as string | undefined;
 // If VITE_API_URL is provided (e.g. https://snippet-api.onrender.com), we append /api.
 // If it already ends with /api, we keep it as is.
-const getApiBase = () => {
+export const getApiBase = () => {
   if (VITE_API_URL) {
     return VITE_API_URL.endsWith("/api") ? VITE_API_URL : `${VITE_API_URL}/api`;
   }
+  if (
+    import.meta.env.PROD ||
+    (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1")
+  ) {
+    return "https://snippet-api-pf9m.onrender.com/api";
+  }
   return "http://localhost:3001/api";
 };
-const API_BASE = getApiBase();
+export const API_BASE = getApiBase();
 
 type RequestOptions = {
   method?: string;
