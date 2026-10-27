@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, FileText, Presentation, NotebookPen, File, Trash2, Upload, Download } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/snippet/AppShell";
 import { useMe } from "@/hooks/use-auth";
-import { api, API_BASE } from "@/lib/api";
+import { api, API_BASE, fetchSubjects, SUBJECTS_QUERY_KEY, type Subject } from "@/lib/api";
 
 export const Route = createFileRoute("/_authenticated/resources")({
   head: () => ({
@@ -36,15 +36,18 @@ function Resources() {
   const [offeringId, setOfferingId] = useState<string>("");
 
   const subjectsQuery = useQuery({
-    queryKey: ["subjects"],
-    queryFn: async () => {
-      const { subjects } = await api<{ subjects: any[] }>("/subjects");
-      if (subjects.length > 0 && !offeringId) {
-        setOfferingId(String(subjects[0].offering_id || subjects[0].id));
-      }
-      return subjects;
-    },
+    queryKey: SUBJECTS_QUERY_KEY,
+    queryFn: fetchSubjects,
   });
+
+  useEffect(() => {
+    if (!offeringId && subjectsQuery.data && subjectsQuery.data.length > 0) {
+      const first = subjectsQuery.data[0];
+      if (first) {
+        setOfferingId(String(first.offering_id || first.id));
+      }
+    }
+  }, [offeringId, subjectsQuery.data]);
 
   const selectedSubject = subjectsQuery.data?.find((subject) => String(subject.offering_id || subject.id) === offeringId);
   const list = useQuery({
@@ -91,16 +94,34 @@ function Resources() {
     <AppShell>
       <h1 className="rise text-[28px] font-semibold tracking-tight">Resources</h1>
       
-      {subjectsQuery.data && subjectsQuery.data.length > 0 ? (
+      {subjectsQuery.isLoading && (
+        <p className="py-12 text-center text-sm text-muted-foreground">Loading subjects…</p>
+      )}
+
+      {subjectsQuery.isError && (
+        <p className="surface mt-4 rounded-[22px] p-4 text-sm text-destructive">
+          Could not load your subjects. Please try again.
+        </p>
+      )}
+
+      {!subjectsQuery.isLoading && !subjectsQuery.isError && subjectsQuery.data && subjectsQuery.data.length === 0 && (
+        <div className="surface mt-4 rounded-[22px] p-5 text-sm text-muted-foreground">
+          No subjects have been assigned to your class yet.
+        </div>
+      )}
+
+      {!subjectsQuery.isLoading && !subjectsQuery.isError && subjectsQuery.data && subjectsQuery.data.length > 0 && (
         <select value={offeringId} onChange={e => setOfferingId(e.target.value)} className="w-full mt-4 rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-hidden focus:border-primary">
           <option value="" disabled>Select Subject</option>
           {subjectsQuery.data.map((s) => (
             <option key={s.offering_id || s.id} value={s.offering_id || s.id}>{s.name} ({s.code})</option>
           ))}
         </select>
-      ) : null}
+      )}
 
-      {(me?.isFaculty || me?.isAdmin) && <UploadCard subjects={subjectsQuery.data || []} isAdmin={Boolean(me?.isAdmin)} />}
+      {!subjectsQuery.isLoading && !subjectsQuery.isError && (me?.isFaculty || me?.isAdmin) && (
+        <UploadCard subjects={subjectsQuery.data ?? []} isAdmin={Boolean(me?.isAdmin)} />
+      )}
       
       <label className="glass mt-5 flex items-center gap-2 rounded-[20px] px-4 py-3">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by title…" className="min-w-0 flex-1 bg-transparent text-sm outline-hidden placeholder:text-muted-foreground" />
@@ -165,9 +186,7 @@ function DeleteBtn({ id }: { id: string }) {
   );
 }
 
-import { useEffect } from "react";
-
-function UploadCard({ subjects, isAdmin }: { subjects: any[]; isAdmin: boolean }) {
+function UploadCard({ subjects, isAdmin }: { subjects: Subject[]; isAdmin: boolean }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [offeringId, setOfferingId] = useState("");
@@ -250,7 +269,7 @@ function UploadCard({ subjects, isAdmin }: { subjects: any[]; isAdmin: boolean }
           description: values.get("description") || null,
         },
       });
-      await qc.invalidateQueries({ queryKey: ["subjects"] });
+      await qc.invalidateQueries({ queryKey: SUBJECTS_QUERY_KEY });
       form.reset();
       setSubjectMsg("Subject created. Choose it below to upload a file.");
     } catch (err: any) {

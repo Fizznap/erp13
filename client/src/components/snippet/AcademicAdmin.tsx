@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { SectionTitle } from "./AppShell";
-import { api } from "@/lib/api";
+import { api, SUBJECTS_QUERY_KEY } from "@/lib/api";
 
 type AcademicClass = {
   id: string;
@@ -399,6 +399,7 @@ export function AcademicAdmin() {
                 },
               });
               qc.invalidateQueries({ queryKey: ["academic-hierarchy"] });
+              qc.invalidateQueries({ queryKey: SUBJECTS_QUERY_KEY });
               alert("Subject created successfully!");
               e.currentTarget.reset();
             } catch (err: any) {

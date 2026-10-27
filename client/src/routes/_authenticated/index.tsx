@@ -6,7 +6,7 @@ import { useMe } from "@/hooks/use-auth";
 import { useAvatarUrl } from "@/lib/avatar";
 import { FacultyHome } from "@/components/snippet/FacultyHome";
 import { AppShell, Progress, SectionTitle, Spark } from "@/components/snippet/AppShell";
-import { api } from "@/lib/api";
+import { api, fetchSubjects, SUBJECTS_QUERY_KEY } from "@/lib/api";
 
 export const Route = createFileRoute("/_authenticated/")({
   head: () => ({
@@ -54,9 +54,10 @@ function Home() {
 
 function StudentHome() {
   const subjects = useQuery({
-    queryKey: ["subjects"],
-    queryFn: () => api<{ subjects: unknown[] }>("/subjects"),
+    queryKey: SUBJECTS_QUERY_KEY,
+    queryFn: fetchSubjects,
   });
+
   const attendance = useQuery({
     queryKey: ["my-history"],
     queryFn: () => api<{ records: { status: string }[] }>("/attendance/my/records"),
@@ -76,7 +77,7 @@ function StudentHome() {
         <p className="mt-2 max-w-[16rem] text-lg font-medium leading-snug">Ask anything about your course material</p>
         <div className="mt-4 flex items-center justify-between">
           <span className="rounded-full bg-card/50 px-3 py-1 text-xs font-medium">
-            {subjects.data?.subjects?.length ? `${subjects.data.subjects.length} assigned subjects` : "Your assigned subjects"}
+            {subjects.data?.length ? `${subjects.data.length} assigned subjects` : "Your assigned subjects"}
           </span>
           <span className="grid h-10 w-10 place-items-center rounded-full bg-foreground text-background"><ArrowRight className="h-4 w-4" /></span>
         </div>

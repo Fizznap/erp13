@@ -163,3 +163,58 @@ export async function apiBlob(endpoint: string): Promise<Blob> {
   }
   return res.blob();
 }
+
+export type Subject = {
+  id: string;
+  name: string;
+  code: string;
+  offering_id?: string | null;
+  faculty_name?: string | null;
+  branch_name?: string | null;
+  branch_code?: string | null;
+  division_name?: string | null;
+  batch_start_year?: number | null;
+  batch_end_year?: number | null;
+  semester_number?: number | null;
+  resource_count?: number | string | null;
+  branch_id?: string | null;
+  batch_id?: string | null;
+  division_id?: string | null;
+  is_enrolled?: boolean | null;
+  description?: string | null;
+  credits?: number | null;
+  [key: string]: unknown;
+};
+
+export const SUBJECTS_QUERY_KEY = ["subjects"] as const;
+
+/**
+ * Normalized subjects fetcher for use in React Query queryFn.
+ * Validates the API response structure { subjects: Subject[] } and guarantees
+ * that callers receive a normalized Subject[] array.
+ * Surfaces descriptive errors for malformed responses or network failures.
+ */
+export async function fetchSubjects(): Promise<Subject[]> {
+  const data = await api<unknown>("/subjects");
+
+  if (!data || typeof data !== "object") {
+    throw new Error("Malformed subjects API response: expected an object");
+  }
+
+  if (!("subjects" in data)) {
+    throw new Error("Malformed subjects API response: missing 'subjects' property");
+  }
+
+  const { subjects } = data as { subjects: unknown };
+  if (!Array.isArray(subjects)) {
+    throw new Error("Malformed subjects API response: 'subjects' property must be an array");
+  }
+
+  return subjects as Subject[];
+}
+
+export const subjectsQueryOptions = {
+  queryKey: SUBJECTS_QUERY_KEY,
+  queryFn: fetchSubjects,
+} as const;
+

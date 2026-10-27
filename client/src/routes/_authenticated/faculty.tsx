@@ -4,7 +4,7 @@ import { ArrowLeft, RefreshCw, Square, Users, Clock } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AppShell, SectionTitle } from "@/components/snippet/AppShell";
 import { useMe } from "@/hooks/use-auth";
-import { api } from "@/lib/api";
+import { api, fetchSubjects, SUBJECTS_QUERY_KEY } from "@/lib/api";
 
 type LabGroup = {
   id: string;
@@ -87,11 +87,8 @@ function FacultyConsole() {
   const [err, setErr] = useState("");
 
   const subjects = useQuery({
-    queryKey: ["subjects"],
-    queryFn: async () => {
-      const { subjects } = await api<{ subjects: any[] }>("/subjects");
-      return subjects;
-    },
+    queryKey: SUBJECTS_QUERY_KEY,
+    queryFn: fetchSubjects,
   });
   const hierarchy = useQuery({
     queryKey: ["academic-hierarchy"],
@@ -271,7 +268,7 @@ function FacultyConsole() {
               {subjects.data?.length ? "Choose a class" : "No classes assigned"}
             </option>
             {subjects.data?.map((s) => (
-              <option key={s.offering_id} value={s.offering_id}>
+              <option key={s.offering_id || s.id} value={s.offering_id ?? ""}>
                 {s.code} · {s.branch_name} - Div {s.division_name}
               </option>
             ))}

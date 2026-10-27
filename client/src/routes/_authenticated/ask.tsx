@@ -2,7 +2,7 @@ import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { ArrowLeft, Camera, FileText, Mic, ArrowUp } from "lucide-react";
 import { useState, useEffect } from "react";
 import { AppShell, Spark } from "@/components/snippet/AppShell";
-import { api } from "@/lib/api";
+import { api, fetchSubjects, type Subject } from "@/lib/api";
 
 export const Route = createFileRoute("/_authenticated/ask")({
   head: () => ({
@@ -21,8 +21,6 @@ export const Route = createFileRoute("/_authenticated/ask")({
 const prompts = ["Explain 3NF with an example", "Summarise Unit 2 of OS", "Quiz me on TCP vs UDP"];
 
 type Msg = { role: "user" | "ai"; text: string; sources?: any[] };
-type Subject = { id: string; name: string; code: string };
-
 function Ask() {
   const router = useRouter();
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -34,10 +32,10 @@ function Ask() {
   useEffect(() => {
     async function loadSubjects() {
       try {
-        const res = await api<{ subjects: Subject[] }>("/subjects");
-        setSubjects(res.subjects);
-        if (res.subjects.length > 0) {
-          setSubject(res.subjects[0]?.id || "");
+        const list = await fetchSubjects();
+        setSubjects(list);
+        if (list.length > 0) {
+          setSubject(list[0]?.id || "");
         }
       } catch (err) {
         console.error("Failed to load subjects", err);

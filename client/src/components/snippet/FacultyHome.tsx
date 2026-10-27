@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Radio, UserCheck, Upload, Users, ArrowRight } from "lucide-react";
 import { SectionTitle } from "./AppShell";
+import { fetchSubjects, SUBJECTS_QUERY_KEY } from "@/lib/api";
 
 // Simple, big-button home for faculty: each card is one job.
 export function FacultyHome({ name }: { name: string }) {
@@ -11,12 +12,8 @@ export function FacultyHome({ name }: { name: string }) {
     refetchInterval: 15000,
   });
   const sections = useQuery({
-    queryKey: ["my-sections-home"],
-    queryFn: async () => {
-      const { api } = await import("@/lib/api");
-      const res = await api<{ subjects: any[] }>("/subjects");
-      return res.subjects;
-    },
+    queryKey: SUBJECTS_QUERY_KEY,
+    queryFn: fetchSubjects,
   });
   const count = pending.data?.length ?? 0;
 
@@ -47,7 +44,7 @@ export function FacultyHome({ name }: { name: string }) {
       {sections.data?.length === 0 && <p className="surface rounded-[22px] p-4 text-sm text-muted-foreground">No classes yet. Tap “My classes” to add your first branch and division.</p>}
       <div className="flex flex-wrap gap-2">
         {sections.data?.map((s) => (
-          <span key={s.offering_id} className="surface rounded-full px-3 py-1.5 text-xs font-medium">
+          <span key={s.offering_id || s.id} className="surface rounded-full px-3 py-1.5 text-xs font-medium">
             {s.code} · {s.branch_name} - Div {s.division_name}
           </span>
         ))}
