@@ -14,9 +14,29 @@ export type AttendanceSubjectSummary = {
   percentage: number;
 };
 
-export function uniqueAttendanceHistory<T extends AttendanceHistoryRecord>(records: T[]): T[] {
+export function parseAttendanceHistoryResponse(payload: unknown): AttendanceHistoryRecord[] {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("Attendance history response is invalid");
+  }
+
+  const records = (payload as { records?: unknown }).records;
+  if (!Array.isArray(records)) {
+    throw new Error("Attendance history response is invalid");
+  }
+
+  return records.filter(
+    (record): record is AttendanceHistoryRecord => record !== null && typeof record === "object",
+  );
+}
+
+export function uniqueAttendanceHistory<T extends AttendanceHistoryRecord = AttendanceHistoryRecord>(
+  records: unknown,
+): T[] {
+  if (!Array.isArray(records)) return [];
+
   const seenSessions = new Set<string>();
   return records.filter((record) => {
+    if (!record || typeof record !== "object") return false;
     const sessionKey = record.session_id ?? record.id;
     if (sessionKey == null) return true;
 
@@ -24,7 +44,7 @@ export function uniqueAttendanceHistory<T extends AttendanceHistoryRecord>(recor
     if (seenSessions.has(key)) return false;
     seenSessions.add(key);
     return true;
-  });
+  }) as T[];
 }
 
 export function summarizeAttendanceHistory(records: AttendanceHistoryRecord[]) {

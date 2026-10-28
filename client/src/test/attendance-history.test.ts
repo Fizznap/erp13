@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { summarizeAttendanceHistory, uniqueAttendanceHistory } from "@/lib/attendance";
+import {
+  parseAttendanceHistoryResponse,
+  summarizeAttendanceHistory,
+  uniqueAttendanceHistory,
+} from "@/lib/attendance";
 
 describe("attendance history summaries", () => {
   it("reports 100 percent when all completed sessions were present", () => {
@@ -55,5 +59,12 @@ describe("attendance history summaries", () => {
       total: 0,
       percentage: 0,
     });
+  });
+
+  it("rejects an unexpected attendance API response shape", () => {
+    expect(() => parseAttendanceHistoryResponse({ records: { rows: [] } })).toThrow(
+      "Attendance history response is invalid",
+    );
+    expect(uniqueAttendanceHistory({ records: [] })).toEqual([]);
   });
 });

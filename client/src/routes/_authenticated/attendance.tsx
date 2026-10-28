@@ -8,7 +8,7 @@ import { SignInHelp } from "@/components/snippet/SignInHelp";
 import { ManualRequest } from "@/components/snippet/ManualRequest";
 import { AttendancePlan } from "@/components/snippet/AttendancePlan";
 import { api } from "@/lib/api";
-import { summarizeAttendanceHistory, uniqueAttendanceHistory } from "@/lib/attendance";
+import { parseAttendanceHistoryResponse, summarizeAttendanceHistory, uniqueAttendanceHistory } from "@/lib/attendance";
 
 export const Route = createFileRoute("/_authenticated/attendance")({
   head: () => ({
@@ -61,11 +61,11 @@ function Attendance() {
   const history = useQuery({
     queryKey: ["my-history"],
     queryFn: async () => {
-      const data = await api<{ records: any[] }>("/attendance/my/records");
-      return data.records ?? [];
+      const response = await api<unknown>("/attendance/my/records");
+      return parseAttendanceHistoryResponse(response);
     },
   });
-  const records = useMemo(() => uniqueAttendanceHistory(history.data ?? []), [history.data]);
+  const records = useMemo(() => uniqueAttendanceHistory(history.data), [history.data]);
 
   const session = (live.data?.[0] as any);
   const countdown = useCountdown((session as any)?.expires_at);
@@ -171,6 +171,15 @@ function Attendance() {
       <AttendancePlan />
       <SignInHelp page="attendance" />
 
+      {history.isError && (
+        <div role="alert" className="surface mt-4 flex items-center justify-between gap-3 rounded-[22px] p-4 text-sm text-destructive">
+          <span>Could not load attendance history.</span>
+          <button type="button" onClick={() => void history.refetch()} className="underline">
+            Try again
+          </button>
+        </div>
+      )}
+
       <SectionTitle>Overview</SectionTitle>
       <div className="surface flex items-center justify-between gap-4 rounded-[24px] p-5">
         <div className="min-w-0">
@@ -203,7 +212,7 @@ function Attendance() {
 
       <SectionTitle>History</SectionTitle>
       <div className="surface divide-y divide-border rounded-[24px]">
-        {records.length === 0 && <p className="p-4 text-sm text-muted-foreground">Nothing here yet.</p>}
+        {!history.isError && records.length === 0 && <p className="p-4 text-sm text-muted-foreground">Nothing here yet.</p>}
         {records.slice(0, 50).map((h) => (
           <div key={h.session_id ?? h.id} className="flex items-center justify-between gap-3 p-4">
             <div className="min-w-0">
