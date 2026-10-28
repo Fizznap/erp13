@@ -8,6 +8,7 @@ import { SignInHelp } from "@/components/snippet/SignInHelp";
 import { ManualRequest } from "@/components/snippet/ManualRequest";
 import { AttendancePlan } from "@/components/snippet/AttendancePlan";
 import { api } from "@/lib/api";
+import { summarizeAttendanceHistory, uniqueAttendanceHistory } from "@/lib/attendance";
 
 export const Route = createFileRoute("/_authenticated/attendance")({
   head: () => ({
@@ -64,6 +65,7 @@ function Attendance() {
       return data.records ?? [];
     },
   });
+  const records = useMemo(() => uniqueAttendanceHistory(history.data ?? []), [history.data]);
 
   const session = (live.data?.[0] as any);
   const countdown = useCountdown((session as any)?.expires_at);
@@ -106,18 +108,7 @@ function Attendance() {
     }
   };
 
-  const stats = useMemo(() => {
-    const map = new Map<string, { name: string; done: number; total: number }>();
-    for (const h of history.data ?? []) {
-      const s = map.get(h.subject_name) ?? { name: h.subject_name, done: 0, total: 0 };
-      s.total++; if (h.status === 'present') s.done++; // status is 'present' in Express
-      map.set(h.subject_name, s);
-    }
-    const list = [...map.values()];
-    const attended = list.reduce((a, s) => a + s.done, 0);
-    const total = list.reduce((a, s) => a + s.total, 0);
-    return { list, attended, total, pct: total ? (attended / total) * 100 : 0 };
-  }, [history.data]);
+  const stats = useMemo(() => summarizeAttendanceHistory(records), [records]);
 
   const marked = session?.already_marked || done;
 
@@ -184,19 +175,19 @@ function Attendance() {
       <div className="surface flex items-center justify-between gap-4 rounded-[24px] p-5">
         <div className="min-w-0">
           <p className="text-sm text-muted-foreground">Overall attendance</p>
-          <p className="text-4xl font-semibold tracking-tight">{stats.total ? stats.pct.toFixed(1) : "—"}<span className="text-xl text-muted-foreground">%</span></p>
+          <p className="text-4xl font-semibold tracking-tight">{stats.total ? stats.percentage.toFixed(1) : "—"}<span className="text-xl text-muted-foreground">%</span></p>
           <p className="text-xs text-muted-foreground">{stats.attended} of {stats.total} sessions</p>
         </div>
-        <Ring value={stats.pct} />
+        <Ring value={stats.percentage} />
       </div>
 
       <SectionTitle>By subject</SectionTitle>
       {stats.list.length === 0 && <p className="surface rounded-[22px] p-4 text-sm text-muted-foreground">No sessions yet. Your subjects appear here after your first class.</p>}
       <div className="space-y-3">
         {stats.list.map((s) => {
-          const p = (s.done / s.total) * 100; const low = p < 75;
+          const p = s.percentage; const low = p < 75;
           return (
-            <div key={s.name} className="surface rounded-[22px] p-4">
+            <div key={s.id} className="surface rounded-[22px] p-4">
               <div className="flex items-start justify-between gap-3">
                 <p className="min-w-0 font-medium leading-snug">{s.name}</p>
                 <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${low ? "bg-peach text-destructive" : "bg-accent text-accent-foreground"}`}>{p.toFixed(1)}%</span>
@@ -204,7 +195,7 @@ function Attendance() {
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
                 <div className={`h-full rounded-full ${low ? "bg-destructive" : "bg-ai"}`} style={{ width: `${p}%` }} />
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">{s.done} of {s.total} sessions{low && " · below 75%"}</p>
+              <p className="mt-2 text-xs text-muted-foreground">{s.attended} of {s.total} sessions{low && " · below 75%"}</p>
             </div>
           );
         })}
@@ -212,9 +203,9 @@ function Attendance() {
 
       <SectionTitle>History</SectionTitle>
       <div className="surface divide-y divide-border rounded-[24px]">
-        {(history.data ?? []).length === 0 && <p className="p-4 text-sm text-muted-foreground">Nothing here yet.</p>}
-        {(history.data ?? []).slice(0, 50).map((h) => (
-          <div key={h.id} className="flex items-center justify-between gap-3 p-4">
+        {records.length === 0 && <p className="p-4 text-sm text-muted-foreground">Nothing here yet.</p>}
+        {records.slice(0, 50).map((h) => (
+          <div key={h.session_id ?? h.id} className="flex items-center justify-between gap-3 p-4">
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">{h.subject_name}</p>
               <p className="text-xs text-muted-foreground">{new Date(h.session_date).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</p>

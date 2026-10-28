@@ -137,7 +137,7 @@ router.post('/offerings', authenticate, authorize('admin', 'faculty'), async (re
       return res.status(409).json({ error: 'Subject offering already exists for this class' });
     }
     console.error('Create offering error:', err);
-    res.status(500).json({ error: 'Failed to create subject offering: ' + err.message });
+    res.status(500).json({ error: 'Failed to create subject offering' });
   }
 });
 

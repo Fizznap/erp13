@@ -20,7 +20,8 @@ services:
     region: oregon
     rootDir: server
     buildCommand: npm ci --production
-    startCommand: npm run db:init && npm run db:cleanup:demo && npm run db:seed:admin && npm run db:seed:students && node src/index.js
+    # Keep destructive demo cleanup and account provisioning out of service restarts.
+    startCommand: npm run db:init && node src/index.js
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:

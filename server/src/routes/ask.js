@@ -121,8 +121,15 @@ router.post('/', authenticate, authorize('student', 'faculty'), ragLimiter, asyn
       temperature: 0.2,
       systemPrompt: `You are a helpful, conversational teaching assistant for the subject "${subjectName}". Provide a comprehensive, detailed, and well-structured explanation based ONLY on the numbered chunks in the context provided. Use markdown for better readability. If the answer cannot be found in the context at all, return EXACTLY: "Not in provided material." ALWAYS include citations like [1] inline.` 
     });
+    const candidateAnswer = typeof llmResp.answer === 'string' ? llmResp.answer.trim() : '';
+    const citationNumbers = Array.from(candidateAnswer.matchAll(/\[(\d+)\]/g), (match) => Number(match[1]));
+    const citationsValid = citationNumbers.length > 0 && citationNumbers.every(
+      (number) => Number.isInteger(number) && number >= 1 && number <= chunks.length
+    );
     const result = {
-      answer: llmResp.answer || 'Not in provided material.',
+      answer: candidateAnswer === 'Not in provided material.' || citationsValid
+        ? candidateAnswer || 'Not in provided material.'
+        : 'Not in provided material.',
       model: llmResp.model,
       tokensIn: llmResp.tokensIn,
       tokensOut: llmResp.tokensOut,

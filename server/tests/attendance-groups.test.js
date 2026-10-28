@@ -76,6 +76,30 @@ describe('division and lab-group attendance scopes', () => {
     expect(pool.query).not.toHaveBeenCalled();
   });
 
+  test.each([
+    [91, 72],
+    [19, 181],
+    ['19', 72],
+  ])('attendance marking rejects invalid coordinates (%s, %s) before database access', async (latitude, longitude) => {
+    const response = await request(app).post('/api/attendance/mark').set('x-role', 'student').send({
+      sessionId: 'session-1', nonce: 'ABC123', latitude, longitude,
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/valid numeric coordinates/i);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test('faculty cannot create a session with invalid coordinates or an excessive radius', async () => {
+    const response = await request(app).post('/api/attendance/start').send({
+      subjectOfferingId: 'offering-1', latitude: 19, longitude: 72, radiusMeters: 1001,
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/radius/i);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
   test('faculty can view a division roster with absent students included', async () => {
     pool.query.mockResolvedValueOnce({ rows: [{
       id: 'session-1', faculty_id: 'test-user', subject_offering_id: 'offering-1',

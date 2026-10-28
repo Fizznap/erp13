@@ -3,6 +3,8 @@ const pdf = require('pdf-parse');
 const { pool } = require('../db/pool');
 const { embedBatch, generateMetadata } = require('./rag');
 
+const EMBEDDING_DIMENSIONS = 768;
+
 /**
  * Approximate token count (simple word-based estimate).
  * 1 token ≈ 0.75 words for English text.
@@ -123,7 +125,9 @@ async function processResource(resourceId, job = null) {
     // Step 1: Extract text from PDF
     console.log(`[Processor] Extracting text from ${resource.original_name}...`);
     const pdfBuffer = fs.readFileSync(resource.file_path);
-    const pdfData = await pdf(pdfBuffer);
+    // pdf-parse's bundled PDF.js mishandles Buffer subclasses with pooled
+    // backing-store offsets. Copy to a plain Uint8Array for reliable xref reads.
+    const pdfData = await pdf(Uint8Array.from(pdfBuffer));
     const rawText = pdfData.text;
     const pageCount = pdfData.numpages;
 
@@ -148,26 +152,23 @@ async function processResource(resourceId, job = null) {
     console.log(`[Processor] Embedding ${textChunks.length} chunks...`);
     const allEmbeddings = [];
     const batchSize = 100;
-    let embeddingFailed = false;
-    let embeddingError = null;
-
-    try {
-      for (let i = 0; i < textChunks.length; i += batchSize) {
-        const batch = textChunks.slice(i, i + batchSize).map(c => c.content);
-        const embeddings = await embedBatch(batch);
-        allEmbeddings.push(...embeddings);
-        
-        const currentBatch = Math.floor(i / batchSize) + 1;
-        const totalBatches = Math.ceil(textChunks.length / batchSize);
-        console.log(`[Processor] Embedded batch ${currentBatch}/${totalBatches}`);
-        
-        const currentProgress = 40 + Math.round((currentBatch / totalBatches) * 50);
-        await updateProgress('EMBEDDING', currentProgress);
+    for (let i = 0; i < textChunks.length; i += batchSize) {
+      const batch = textChunks.slice(i, i + batchSize).map(c => c.content);
+      const embeddings = await embedBatch(batch);
+      if (!Array.isArray(embeddings) || embeddings.length !== batch.length ||
+          embeddings.some((embedding) => !Array.isArray(embedding) ||
+            embedding.length !== EMBEDDING_DIMENSIONS ||
+            embedding.some((value) => !Number.isFinite(value)))) {
+        throw new Error(`Embedding provider returned invalid vectors (expected ${batch.length} vectors of ${EMBEDDING_DIMENSIONS} dimensions)`);
       }
-    } catch (embedErr) {
-      console.warn(`[Processor] Embedding failed for resource ${resourceId} (non-fatal):`, embedErr.message);
-      embeddingFailed = true;
-      embeddingError = embedErr.message;
+      allEmbeddings.push(...embeddings);
+
+      const currentBatch = Math.floor(i / batchSize) + 1;
+      const totalBatches = Math.ceil(textChunks.length / batchSize);
+      console.log(`[Processor] Embedded batch ${currentBatch}/${totalBatches}`);
+
+      const currentProgress = 40 + Math.round((currentBatch / totalBatches) * 50);
+      await updateProgress('EMBEDDING', currentProgress);
     }
 
     // Step 4: Store chunks + embeddings (only if embedding succeeded)
@@ -177,7 +178,7 @@ async function processResource(resourceId, job = null) {
     await pool.query('DELETE FROM resource_chunks WHERE resource_id = $1', [resourceId]);
 
     let storedChunkCount = 0;
-    if (!embeddingFailed && allEmbeddings.length === textChunks.length) {
+    if (allEmbeddings.length === textChunks.length) {
       // Estimate page numbers based on chunk position
       const charsPerPage = Math.ceil(rawText.length / Math.max(pageCount, 1));
 
@@ -198,8 +199,8 @@ async function processResource(resourceId, job = null) {
         );
       }
       storedChunkCount = textChunks.length;
-    } else if (embeddingFailed) {
-      console.warn(`[Processor] Skipping chunk storage due to embedding failure. Resource will be marked ready without AI search capability.`);
+    } else {
+      throw new Error(`Embedding provider returned ${allEmbeddings.length} vectors for ${textChunks.length} chunks`);
     }
 
     // Step 5: Generate metadata
@@ -210,9 +211,8 @@ async function processResource(resourceId, job = null) {
       metadata = await generateMetadata(chunkObjs);
     } catch (metaErr) {
       console.warn('[Processor] Metadata generation failed (non-fatal):', metaErr.message);
-      const embeddingNote = embeddingFailed ? ' AI search is not available for this document due to an embedding service issue.' : '';
       metadata = {
-        summary: `Document "${resource.original_name}" with ${pageCount} pages and ${textChunks.length} content sections.${embeddingNote}`,
+        summary: `Document "${resource.original_name}" with ${pageCount} pages and ${textChunks.length} content sections.`,
         keyTopics: [],
         bulletPoints: [],
       };
@@ -220,7 +220,6 @@ async function processResource(resourceId, job = null) {
 
     // Step 6: Update resource as ready
     await updateProgress('READY', 100);
-    const errorMsg = embeddingFailed ? `AI search unavailable: ${embeddingError}` : null;
     await pool.query(
       `UPDATE resources SET
         status = 'ready',
@@ -229,21 +228,20 @@ async function processResource(resourceId, job = null) {
         bullet_points = $3,
         page_count = $4,
         chunk_count = $5,
-        error_message = $6,
+        error_message = NULL,
         processed_at = now()
-       WHERE id = $7`,
+       WHERE id = $6`,
       [
         metadata.summary,
         JSON.stringify(metadata.keyTopics || []),
         JSON.stringify(metadata.bulletPoints || []),
         pageCount,
         storedChunkCount,
-        errorMsg,
         resourceId,
       ]
     );
 
-    console.log(`[Processor] Resource ${resourceId} processed successfully (${storedChunkCount} chunks stored${embeddingFailed ? ', embedding failed' : ''})`);
+    console.log(`[Processor] Resource ${resourceId} processed successfully (${storedChunkCount} chunks stored)`);
     return { success: true, chunkCount: storedChunkCount };
   } catch (err) {
     console.error(`[Processor] Failed to process resource ${resourceId}:`, err);

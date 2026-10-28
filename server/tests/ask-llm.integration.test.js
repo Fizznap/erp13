@@ -92,5 +92,29 @@ describe('API /api/ask integration - LLM adapter wiring', () => {
     expect(res.status).toBe(200);
     expect(res.body.answer).toContain('LLM ANSWER');
     expect(llmAdapter.generateAnswer).toHaveBeenCalled();
+    const [{ question, numberedContext }] = llmAdapter.generateAnswer.mock.calls[0];
+    expect(question).toBe('on-topic question that should match content');
+    expect(numberedContext).toEqual([{
+      n: 1,
+      label: 'doc1.pdf | page 1 | chunk 0',
+      text: 'on-topic chunk',
+    }]);
+  });
+
+  test('unrecognized citation numbers fall back instead of claiming unsupported sources', async () => {
+    embedQuery.mockResolvedValue([0.1, 0.2]);
+    vectorSearch.mockResolvedValue([
+      { id: 'chunk1', resource_id: 'resource-1', content: 'on-topic chunk', original_name: 'doc1.pdf', page_number: 1, chunk_index: 0, similarity: 0.90 }
+    ]);
+    llmAdapter.generateAnswer.mockResolvedValue({ answer: 'Unsupported claim [99]', tokensIn: 10, tokensOut: 10, model: 'mock' });
+
+    const res = await request(app)
+      .post('/api/ask')
+      .send({ query: 'on-topic question', subjectId });
+
+    expect(res.status).toBe(200);
+    expect(res.body.answer).toBe('Not in provided material.');
+    expect(res.body.wasFound).toBe(false);
+    expect(res.body.sources).toEqual([]);
   });
 });

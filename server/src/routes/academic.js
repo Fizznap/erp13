@@ -114,7 +114,8 @@ router.post('/classes', authenticate, authorize('admin'), async (req, res) => {
     );
     res.status(201).json({ academicClass: result.rows[0] });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to create academic class: ' + err.message });
+    console.error('Create academic class error:', err);
+    res.status(500).json({ error: 'Failed to create academic class' });
   }
 });
 

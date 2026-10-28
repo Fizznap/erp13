@@ -10,6 +10,7 @@ require('dotenv').config();
 const PROVIDER = process.env.LLM_PROVIDER || 'mock';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY;
 const GOOGLE_AI_API_KEY = process.env.GOOGLE_AI_API_KEY;
+const GOOGLE_API_TIMEOUT_MS = Math.max(1000, Number(process.env.GOOGLE_AI_TIMEOUT_MS) || 30000);
 
 function buildContextPrompt(question, numberedContext, systemPrompt) {
   // Build a single prompt body that we will pass to the LLM
@@ -55,9 +56,9 @@ async function generateOpenAI({ question, numberedContext, systemPrompt, tempera
   return { answer, raw: json, tokensIn: json.usage?.prompt_tokens || 0, tokensOut: json.usage?.completion_tokens || 0, model };
 }
 
-async function generateGoogle({ question, numberedContext, systemPrompt, temperature = 0.0 }) {
+async function generateGoogle({ question, numberedContext, systemPrompt }) {
   const promptText = buildContextPrompt(question, numberedContext, systemPrompt);
-  const model = process.env.GOOGLE_AI_MODEL || 'gemini-3.5-flash';
+  const model = process.env.GOOGLE_AI_MODEL || 'gemini-3.1-flash-lite';
   const maxOutputTokens = Number(process.env.GOOGLE_AI_MAX_OUTPUT_TOKENS || 800);
 
   const apiKey = process.env.GOOGLE_AI_API_KEY || null;
@@ -65,17 +66,17 @@ async function generateGoogle({ question, numberedContext, systemPrompt, tempera
   const body = {
     contents: [{ role: 'user', parts: [{ text: promptText }] }],
     generationConfig: {
-      temperature: Number(temperature) || 0.0,
       maxOutputTokens
     }
   };
 
   let res;
   if (apiKey) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
     res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      timeout: GOOGLE_API_TIMEOUT_MS,
       body: JSON.stringify(body)
     });
   } else {
@@ -92,13 +93,13 @@ async function generateGoogle({ question, numberedContext, systemPrompt, tempera
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`
       },
+      timeout: GOOGLE_API_TIMEOUT_MS,
       body: JSON.stringify(body)
     });
   }
 
   if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Google Generative API error ${res.status}: ${txt}`);
+    throw new Error(`Google Generative API error ${res.status}`);
   }
 
   const json = await res.json();
@@ -128,7 +129,7 @@ async function generateAnswer({ question, numberedContext = [], systemPrompt = n
   if (PROVIDER === 'openai') {
     return generateOpenAI({ question, numberedContext, systemPrompt: strictSystemPrompt, temperature });
   } else if (PROVIDER === 'google') {
-    return generateGoogle({ question, numberedContext, systemPrompt: strictSystemPrompt, temperature });
+    return generateGoogle({ question, numberedContext, systemPrompt: strictSystemPrompt });
   } else {
     return generateMock({ question, numberedContext, systemPrompt: strictSystemPrompt, temperature });
   }

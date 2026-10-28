@@ -3,19 +3,37 @@ require('dotenv').config();
 
 const GOOGLE_AI_API_KEY = process.env.GOOGLE_AI_API_KEY;
 const EMBEDDING_MODEL = 'gemini-embedding-2';
-const GENERATION_MODEL = 'gemini-3.5-flash';
-const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const GENERATION_MODEL = process.env.GOOGLE_AI_MODEL || 'gemini-3.1-flash-lite';
+const GOOGLE_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const API_BASE = (() => {
+  const override = process.env.GOOGLE_AI_API_BASE_URL;
+  if (!override) return GOOGLE_API_BASE;
+  if (process.env.NODE_ENV !== 'test') {
+    throw new Error('GOOGLE_AI_API_BASE_URL is only supported in test mode');
+  }
+  const url = new URL(override);
+  if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(url.hostname) || url.username || url.password) {
+    throw new Error('Test Gemini API base must be a local HTTP URL');
+  }
+  return `${url.origin}${url.pathname.replace(/\/$/, '')}`;
+})();
+const API_TIMEOUT_MS = Math.max(1000, Number(process.env.GOOGLE_AI_TIMEOUT_MS) || 30000);
+
+function fetchGoogleApi(url, options) {
+  return fetch(url, { ...options, signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+}
 
 /**
- * Embed a single text string using Google's text-embedding-004.
+ * Embed a single text string using Google's embedding model.
  * Returns a 768-dimensional float array.
  */
 async function embedText(text) {
-  const response = await fetch(
-    `${API_BASE}/models/${EMBEDDING_MODEL}:embedContent?key=${GOOGLE_AI_API_KEY}`,
+  if (!GOOGLE_AI_API_KEY) throw new Error('GOOGLE_AI_API_KEY is not configured');
+  const response = await fetchGoogleApi(
+    `${API_BASE}/models/${EMBEDDING_MODEL}:embedContent`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GOOGLE_AI_API_KEY },
       body: JSON.stringify({
         model: `models/${EMBEDDING_MODEL}`,
         content: { parts: [{ text }] },
@@ -25,8 +43,7 @@ async function embedText(text) {
   );
 
   if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Embedding API error: ${response.status} - ${err}`);
+    throw new Error(`Embedding API error: ${response.status}`);
   }
 
   const data = await response.json();
@@ -37,24 +54,24 @@ async function embedText(text) {
  * Batch embed multiple texts. Google API supports batch embedding.
  */
 async function embedBatch(texts) {
+  if (!GOOGLE_AI_API_KEY) throw new Error('GOOGLE_AI_API_KEY is not configured');
   const requests = texts.map((text) => ({
     model: `models/${EMBEDDING_MODEL}`,
     content: { parts: [{ text }] },
     outputDimensionality: 768
   }));
 
-  const response = await fetch(
-    `${API_BASE}/models/${EMBEDDING_MODEL}:batchEmbedContents?key=${GOOGLE_AI_API_KEY}`,
+  const response = await fetchGoogleApi(
+    `${API_BASE}/models/${EMBEDDING_MODEL}:batchEmbedContents`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GOOGLE_AI_API_KEY },
       body: JSON.stringify({ requests }),
     }
   );
 
   if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Batch embedding API error: ${response.status} - ${err}`);
+    throw new Error(`Batch embedding API error: ${response.status}`);
   }
 
   const data = await response.json();
@@ -106,6 +123,7 @@ async function vectorSearch(queryEmbedding, subjectId, userScope, topK = 5) {
  * Strict RAG — answer ONLY from provided context.
  */
 async function generateAnswer(query, chunks, subjectName) {
+  if (!GOOGLE_AI_API_KEY) throw new Error('GOOGLE_AI_API_KEY is not configured');
   // Build context from chunks
   const context = chunks
     .map((c, i) =>
@@ -125,16 +143,15 @@ STUDENT QUESTION: ${query}
 
 Answer using ONLY the context above. Cite sources as [Source N].`;
 
-  const response = await fetch(
-    `${API_BASE}/models/${GENERATION_MODEL}:generateContent?key=${GOOGLE_AI_API_KEY}`,
+  const response = await fetchGoogleApi(
+    `${API_BASE}/models/${GENERATION_MODEL}:generateContent`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GOOGLE_AI_API_KEY },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
         systemInstruction: { parts: [{ text: systemPrompt }] },
         generationConfig: {
-          temperature: 0.1, // Low temperature for factual accuracy
           maxOutputTokens: 1024,
         },
       }),
@@ -142,8 +159,7 @@ Answer using ONLY the context above. Cite sources as [Source N].`;
   );
 
   if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Generation API error: ${response.status} - ${err}`);
+    throw new Error(`Generation API error: ${response.status}`);
   }
 
   const data = await response.json();
@@ -170,6 +186,7 @@ Answer using ONLY the context above. Cite sources as [Source N].`;
  * Generate metadata (summary, key topics, bullet points) from chunks.
  */
 async function generateMetadata(chunks) {
+  if (!GOOGLE_AI_API_KEY) throw new Error('GOOGLE_AI_API_KEY is not configured');
   const text = chunks.slice(0, 5).map((c) => c.content).join('\n\n');
 
   const prompt = `Analyze this academic content and provide:
@@ -187,15 +204,14 @@ Respond ONLY in this exact JSON format:
   "bulletPoints": ["point1", "point2", ...]
 }`;
 
-  const response = await fetch(
-    `${API_BASE}/models/${GENERATION_MODEL}:generateContent?key=${GOOGLE_AI_API_KEY}`,
+  const response = await fetchGoogleApi(
+    `${API_BASE}/models/${GENERATION_MODEL}:generateContent`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GOOGLE_AI_API_KEY },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
-          temperature: 0.2,
           maxOutputTokens: 1024,
           responseMimeType: 'application/json',
         },
@@ -204,8 +220,7 @@ Respond ONLY in this exact JSON format:
   );
 
   if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Metadata generation error: ${response.status} - ${err}`);
+    throw new Error(`Metadata generation error: ${response.status}`);
   }
 
   const data = await response.json();

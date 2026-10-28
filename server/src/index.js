@@ -1,7 +1,6 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const { apiLimiter } = require('./middleware/rateLimit');
 
 const app = express();
@@ -33,7 +32,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.get('/api/health/db', async (req, res) => {
+app.get('/api/health/db', apiLimiter, async (req, res) => {
   try {
     const { pool } = require('./db/pool');
     const tables = await pool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'");
@@ -53,8 +52,9 @@ app.get('/api/health/db', async (req, res) => {
 
 app.use('/api', apiLimiter);
 
-// Serve uploaded files (for admin/debug only)
-app.use('/uploads', express.static(path.join(__dirname, '..', process.env.UPLOAD_DIR || 'uploads')));
+// Uploaded files are private; resource downloads use the authorization-checked
+// /api/resources/:id/download route. Keep direct filesystem access admin-only.
+app.use('/uploads', require('./routes/uploads'));
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -78,7 +78,7 @@ app.use((err, req, res, next) => {
     return res.status(400).json({ error: err.message });
   }
 
-  res.status(500).json({ error: err.message || 'Internal server error' });
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 // Initialize queue (graceful if Redis unavailable)

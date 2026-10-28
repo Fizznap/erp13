@@ -33,6 +33,17 @@ const upload = multer({
   },
 });
 
+async function hasPdfSignature(filePath) {
+  const file = await fs.promises.open(filePath, 'r');
+  try {
+    const header = Buffer.alloc(5);
+    const { bytesRead } = await file.read(header, 0, header.length, 0);
+    return bytesRead === header.length && header.toString('ascii') === '%PDF-';
+  } finally {
+    await file.close();
+  }
+}
+
 /**
  * Return SQL WHERE clause + params to scope a resource list query to the
  * caller's authorized scope.
@@ -114,6 +125,14 @@ async function canAccessResource(user, resourceId) {
 router.post('/upload', authenticate, authorize('faculty', 'admin'), upload.single('file'), async (req, res) => {
   try {
     const { subjectOfferingId, subjectId, kind } = req.body;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'A PDF file is required' });
+    }
+    if (!await hasPdfSignature(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Uploaded file is not a valid PDF' });
+    }
     
     // Support either subjectOfferingId (new) or subjectId (legacy)
     if (!subjectOfferingId && !subjectId) {
@@ -195,7 +214,12 @@ router.post('/upload', authenticate, authorize('faculty', 'admin'), upload.singl
     res.status(201).json({ resource });
   } catch (err) {
     console.error('Upload error:', err);
-    res.status(500).json({ error: 'Upload failed', details: err.message, stack: err.stack });
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (cleanupError) {
+        console.error('Could not remove rejected upload:', cleanupError.message);
+      }
+    }
+    res.status(500).json({ error: 'Upload failed' });
   }
 });
 
@@ -220,7 +244,7 @@ router.get('/', authenticate, async (req, res) => {
         `SELECT id, subject_id, subject_offering_id, filename, original_name, file_size, status,
                 summary, key_topics, bullet_points, page_count, chunk_count,
                 created_at, processed_at
-         FROM resources
+         FROM resources r
          WHERE subject_offering_id = $1${scopeClause}
          ORDER BY created_at DESC`,
         allParams
@@ -230,7 +254,7 @@ router.get('/', authenticate, async (req, res) => {
         `SELECT id, subject_id, subject_offering_id, filename, original_name, file_size, status,
                 summary, key_topics, bullet_points, page_count, chunk_count,
                 created_at, processed_at
-         FROM resources
+         FROM resources r
          WHERE subject_id = $1${scopeClause}
          ORDER BY created_at DESC`,
         allParams

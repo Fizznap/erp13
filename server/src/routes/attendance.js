@@ -42,15 +42,27 @@ function generateNonce() {
   return crypto.randomBytes(3).toString('hex').toUpperCase(); // 6-char hex
 }
 
+function isValidLocation(latitude, longitude) {
+  return Number.isFinite(latitude) && Number.isFinite(longitude) &&
+    latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
+}
+
 // POST /api/attendance/start — faculty starts attendance session
 router.post('/start', authenticate, authorize('faculty'), async (req, res) => {
   try {
     const { subjectOfferingId, subjectId, latitude, longitude, radiusMeters } = req.body;
     const sessionType = req.body.sessionType === 'lab' ? 'lab' : 'lecture';
     const academicLabGroupId = req.body.academicLabGroupId || null;
+    const radius = radiusMeters == null ? 50 : radiusMeters;
 
     if ((!subjectOfferingId && !subjectId) || latitude == null || longitude == null) {
       return res.status(400).json({ error: 'subjectOfferingId, latitude, and longitude are required' });
+    }
+    if (!isValidLocation(latitude, longitude)) {
+      return res.status(400).json({ error: 'Latitude and longitude must be valid numeric coordinates' });
+    }
+    if (!Number.isInteger(radius) || radius < 1 || radius > 1000) {
+      return res.status(400).json({ error: 'Radius must be an integer between 1 and 1000 meters' });
     }
 
     let actualSubjectId = subjectId;
@@ -115,7 +127,7 @@ router.post('/start', authenticate, authorize('faculty'), async (req, res) => {
     const result = await pool.query(
       `INSERT INTO attendance_sessions (subject_id, subject_offering_id, academic_lab_group_id, faculty_id, latitude, longitude, radius_meters, active_nonce, nonce_expires)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [actualSubjectId, actualOfferingId, academicLabGroupId, req.user.id, latitude, longitude, radiusMeters || 50, nonce, nonceExpires]
+      [actualSubjectId, actualOfferingId, academicLabGroupId, req.user.id, latitude, longitude, radius, nonce, nonceExpires]
     );
 
     res.status(201).json({ session: result.rows[0] });
@@ -163,11 +175,14 @@ router.post('/mark', authenticate, authorize('student'), async (req, res) => {
   try {
     const { sessionId, subjectOfferingId, subjectId, nonce, latitude, longitude } = req.body;
     const deviceId = req.headers['x-device-id'] || 'unknown-device';
-    const locHash = crypto.createHash('sha256').update(`${latitude},${longitude}`).digest('hex');
 
     if (!(sessionId || subjectOfferingId || subjectId || nonce) || typeof nonce !== 'string' || !nonce || latitude == null || longitude == null) {
       return res.status(400).json({ error: 'sessionId (or offering/subject/nonce), latitude, and longitude are required' });
     }
+    if (!isValidLocation(latitude, longitude)) {
+      return res.status(400).json({ error: 'Latitude and longitude must be valid numeric coordinates' });
+    }
+    const locHash = crypto.createHash('sha256').update(`${latitude},${longitude}`).digest('hex');
 
     // Get session
     let sessionResult;
@@ -463,16 +478,56 @@ router.get('/sessions', authenticate, authorize('faculty', 'admin'), async (req,
   }
 });
 
-// GET /api/attendance/my/records?subjectOfferingId=X — student's attendance records
+// GET /api/attendance/my/records?subjectOfferingId=X — completed sessions the student was eligible to attend
 router.get('/my/records', authenticate, authorize('student'), async (req, res) => {
   try {
     const { subjectOfferingId, subjectId } = req.query;
     let query = `
-      SELECT ar.*, a.subject_id, a.subject_offering_id, s.name AS subject_name, a.started_at AS session_date
-      FROM attendance_records ar
-      JOIN attendance_sessions a ON a.id = ar.session_id
+      SELECT a.id AS id, a.id AS session_id, ar.id AS attendance_record_id,
+             a.subject_id, a.subject_offering_id, s.name AS subject_name,
+             a.started_at AS session_date, ar.marked_at,
+             CASE WHEN ar.status = 'present' THEN 'present' ELSE 'absent' END AS status,
+             ar.verification_method, ar.rejection_reason
+      FROM attendance_sessions a
       JOIN subjects s ON s.id = a.subject_id
-      WHERE ar.student_id = $1
+      JOIN users u ON u.id = $1 AND u.role = 'student' AND u.is_active = true AND u.email_verified = true
+      JOIN academic_classes student_class ON student_class.id = u.academic_class_id
+      LEFT JOIN user_profiles p ON p.user_id = u.id
+      LEFT JOIN LATERAL (
+        SELECT r.id, r.status, r.marked_at, r.verification_method, r.rejection_reason
+        FROM attendance_records r
+        WHERE r.session_id = a.id AND r.student_id = u.id
+        ORDER BY r.marked_at DESC, r.id DESC
+        LIMIT 1
+      ) ar ON true
+      WHERE a.is_active = false AND a.ended_at IS NOT NULL
+        AND (a.academic_lab_group_id IS NULL OR p.academic_lab_group_id = a.academic_lab_group_id)
+        AND (
+          (a.subject_offering_id IS NOT NULL AND EXISTS (
+            SELECT 1
+            FROM subject_offerings so
+            JOIN academic_classes offered_class ON offered_class.id = so.academic_class_id
+            WHERE so.id = a.subject_offering_id AND so.subject_id = a.subject_id
+              AND offered_class.branch_id = student_class.branch_id
+              AND offered_class.batch_id = student_class.batch_id
+              AND offered_class.division_id = student_class.division_id
+          ))
+          OR (a.subject_offering_id IS NULL AND (
+            EXISTS (
+              SELECT 1
+              FROM subject_offerings so
+              JOIN academic_classes offered_class ON offered_class.id = so.academic_class_id
+              WHERE so.subject_id = a.subject_id
+                AND offered_class.branch_id = student_class.branch_id
+                AND offered_class.batch_id = student_class.batch_id
+                AND offered_class.division_id = student_class.division_id
+            )
+            OR EXISTS (
+              SELECT 1 FROM subject_enrollments se
+              WHERE se.student_id = u.id AND se.subject_id = a.subject_id
+            )
+          ))
+        )
     `;
     const params = [req.user.id];
     if (subjectOfferingId) {
@@ -482,7 +537,7 @@ router.get('/my/records', authenticate, authorize('student'), async (req, res) =
       query += ' AND a.subject_id = $2';
       params.push(subjectId);
     }
-    query += ' ORDER BY ar.marked_at DESC';
+    query += ' ORDER BY a.started_at DESC, a.id';
 
     const result = await pool.query(query, params);
     res.json({ records: result.rows });

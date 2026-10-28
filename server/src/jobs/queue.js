@@ -7,7 +7,7 @@ try {
 
 let processingQueue = null;
 
-function initQueue() {
+function initQueue({ processJobs = true } = {}) {
   if (!Queue) return null;
 
   const redisUrl = process.env.REDIS_URL;
@@ -26,13 +26,16 @@ function initQueue() {
       },
     });
 
-    // Process jobs
-    processingQueue.process('process-resource', async (job) => {
-      const { processResource } = require('../services/processor');
-      const { resourceId } = job.data;
-      console.log(`[Queue] Processing resource ${resourceId}...`);
-      return processResource(resourceId, job);
-    });
+    // The API can initialize a producer-only queue while a standalone worker
+    // consumes jobs. Default behavior remains inline-compatible for Render.
+    if (processJobs) {
+      processingQueue.process('process-resource', async (job) => {
+        const { processResource } = require('../services/processor');
+        const { resourceId } = job.data;
+        console.log(`[Queue] Processing resource ${resourceId}...`);
+        return processResource(resourceId, job);
+      });
+    }
 
     processingQueue.on('completed', (job, result) => {
       console.log(`[Queue] Job ${job.id} completed:`, result);
