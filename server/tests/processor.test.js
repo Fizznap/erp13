@@ -20,7 +20,13 @@ describe('resource processing', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    readFileSync = jest.spyOn(fs, 'readFileSync').mockReturnValue(Buffer.from('pdf fixture'));
+    const origReadFileSync = fs.readFileSync.bind(fs);
+    readFileSync = jest.spyOn(fs, 'readFileSync').mockImplementation((filePath, options) => {
+      if (typeof filePath === 'string' && (filePath === 'test.pdf' || filePath.endsWith('.pdf'))) {
+        return Buffer.from('pdf fixture');
+      }
+      return origReadFileSync(filePath, options);
+    });
     parsePdf.mockResolvedValue({ text: extractedText, numpages: 1 });
     generateMetadata.mockResolvedValue({ summary: 'Summary', keyTopics: [], bulletPoints: [] });
     pool.query.mockImplementation((sql) => {

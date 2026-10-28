@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, FileText, Presentation, NotebookPen, File, Trash2, Upload, Download } from "lucide-react";
+import { Search, FileText, Presentation, NotebookPen, File, Trash2, Upload, Download, ExternalLink } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/snippet/AppShell";
 import { useMe } from "@/hooks/use-auth";
-import { api, API_BASE, fetchSubjects, SUBJECTS_QUERY_KEY, type Subject } from "@/lib/api";
+import { api, API_BASE, fetchSubjects, fetchResourcePdf, SUBJECTS_QUERY_KEY, type Subject } from "@/lib/api";
 
 export const Route = createFileRoute("/_authenticated/resources")({
   head: () => ({
@@ -65,28 +65,162 @@ function Resources() {
 
   const items = (list.data ?? []).filter((i) => (f === "All" || i.kind === f) && `${i.filename} ${i.original_name}`.toLowerCase().includes(q.toLowerCase()));
 
-  const open = async (id: string) => {
+  const [actionError, setActionError] = useState<{ id?: string; message: string } | null>(null);
+  const [activeActionId, setActiveActionId] = useState<string | null>(null);
 
-    const token = localStorage.getItem('snippet_token');
-    
-    // Quick hack to download using a fetch so we can pass auth headers, 
-    // or just let the user login via cookies. Since we use JWT in headers, we must fetch and create an object URL.
-    try {
-      const res = await fetch(`${API_BASE}/resources/${id}/download`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+  // Track open preview tabs and their associated blob URLs for reliable cleanup
+  const activeBlobTabsRef = useRef<Map<string, { url: string; timer?: ReturnType<typeof setInterval> }>>(new Map());
+
+  // Cleanup all active Blob URLs when unmounting or navigating away
+  useEffect(() => {
+    const activeTabs = activeBlobTabsRef.current;
+    const cleanupAll = () => {
+      activeTabs.forEach(({ url, timer }) => {
+        if (timer) clearInterval(timer);
+        try {
+          window.URL.revokeObjectURL(url);
+        } catch (_err) {
+          void _err;
+        }
       });
-      if (!res.ok) throw new Error("Failed to download");
-      const blob = await res.blob();
+      activeTabs.clear();
+    };
+
+    window.addEventListener("beforeunload", cleanupAll);
+    return () => {
+      window.removeEventListener("beforeunload", cleanupAll);
+      cleanupAll();
+    };
+  }, []);
+
+  const open = async (id: string) => {
+    setActionError(null);
+    setActiveActionId(id);
+
+    // Open a temporary blank window synchronously during the click event to avoid popup blockers
+    let popup: Window | null = null;
+    try {
+      popup = window.open("about:blank", "_blank");
+      if (popup) {
+        try {
+          popup.document.title = "Opening PDF…";
+        } catch {
+          // Ignore potential cross-origin document access restrictions
+        }
+      }
+    } catch {
+      // Ignored: popup window opening failed
+    }
+
+    try {
+      const blob = await fetchResourcePdf(id, "inline");
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
+
+      let targetTab = popup;
+      if (popup && !popup.closed) {
+        popup.location.href = url;
+      } else {
+        targetTab = window.open(url, "_blank");
+      }
+
+      if (targetTab) {
+        // Clear any previous preview URL for this specific resource
+        const existing = activeBlobTabsRef.current.get(id);
+        if (existing) {
+          if (existing.timer) clearInterval(existing.timer);
+          try {
+            window.URL.revokeObjectURL(existing.url);
+          } catch (_err) {
+            void _err;
+          }
+          activeBlobTabsRef.current.delete(id);
+        }
+
+        // Reliable cleanup tied directly to the PDF tab being closed by the user.
+        // The Blob URL is preserved as long as the tab is open (past 60s, indefinitely while reading).
+        const revokeBlob = () => {
+          const entry = activeBlobTabsRef.current.get(id);
+          if (entry?.timer) clearInterval(entry.timer);
+          try {
+            window.URL.revokeObjectURL(url);
+          } catch (_err) {
+            void _err;
+          }
+          activeBlobTabsRef.current.delete(id);
+        };
+
+        const checkTimer = setInterval(() => {
+          try {
+            if (targetTab.closed) {
+              revokeBlob();
+            }
+          } catch (_err) {
+            void _err;
+          }
+        }, 1500);
+
+        try {
+          targetTab.addEventListener("pagehide", revokeBlob, { once: true });
+          targetTab.addEventListener("unload", revokeBlob, { once: true });
+        } catch (_err) {
+          void _err;
+        }
+
+        activeBlobTabsRef.current.set(id, { url, timer: checkTimer });
+      } else {
+        setActionError({
+          id,
+          message: "Popup was blocked by your browser. Please allow popups for this site or use the download button.",
+        });
+        try {
+          window.URL.revokeObjectURL(url);
+        } catch (_err) {
+          void _err;
+        }
+      }
+    } catch (err: unknown) {
+      if (popup && !popup.closed) {
+        popup.close();
+      }
+      const message = err instanceof Error ? err.message : "Couldn't open this file.";
+      setActionError({
+        id,
+        message,
+      });
+    } finally {
+      setActiveActionId(null);
+    }
+  };
+
+  const download = async (id: string, originalName: string) => {
+    setActionError(null);
+    setActiveActionId(`download-${id}`);
+
+    try {
+      const blob = await fetchResourcePdf(id, "attachment");
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
       a.href = url;
-      a.download = "download"; // Should pull from res headers ideally
+      const filename = originalName.toLowerCase().endsWith(".pdf") ? originalName : `${originalName}.pdf`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (e) {
-      alert("Couldn't open this file.");
+      setTimeout(() => {
+        try {
+          window.URL.revokeObjectURL(url);
+        } catch (_err) {
+          void _err;
+        }
+      }, 10000);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Couldn't download this file.";
+      setActionError({
+        id,
+        message,
+      });
+    } finally {
+      setActiveActionId(null);
     }
   };
 
@@ -132,6 +266,12 @@ function Resources() {
           <button key={x} onClick={() => setF(x)} className={`press shrink-0 rounded-full px-4 py-1.5 text-sm font-medium ${f === x ? "bg-foreground text-background" : "surface"}`}>{x}</button>
         ))}
       </div>
+      {actionError && (!actionError.id || !items.some((i) => i.id === actionError?.id)) && (
+        <div className="surface mt-4 flex items-center justify-between rounded-[20px] border border-destructive/20 bg-destructive/10 p-4 text-xs font-medium text-destructive">
+          <span>{actionError.message}</span>
+          <button type="button" onClick={() => setActionError(null)} className="ml-2 font-bold hover:underline">Dismiss</button>
+        </div>
+      )}
       <div className="mt-5 grid gap-3 md:grid-cols-2">
         {items.map((r) => {
           const L = look[(r.kind as keyof typeof look) ?? "Other"] ?? look.Other;
@@ -159,9 +299,29 @@ function Resources() {
               )}
 
               <div className="mt-3 flex gap-2">
-                <button onClick={() => open(r.id)} className="press flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-foreground py-2.5 text-sm font-semibold text-background"><Download className="h-4 w-4" /> Open</button>
+                <button
+                  type="button"
+                  onClick={() => open(r.id)}
+                  disabled={activeActionId === r.id}
+                  className="press flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-foreground py-2.5 text-sm font-semibold text-background disabled:opacity-50"
+                >
+                  <ExternalLink className="h-4 w-4" /> {activeActionId === r.id ? "Opening…" : "Open"}
+                </button>
+                <button
+                  type="button"
+                  title="Download PDF"
+                  aria-label={`Download ${r.original_name}`}
+                  onClick={() => download(r.id, r.original_name)}
+                  disabled={activeActionId === `download-${r.id}`}
+                  className="press grid w-11 place-items-center rounded-2xl border border-border bg-card text-muted-foreground hover:text-foreground disabled:opacity-50"
+                >
+                  <Download className="h-4 w-4" />
+                </button>
                 {(me?.isFaculty || me?.isAdmin) && <DeleteBtn id={r.id} />}
               </div>
+              {actionError && actionError.id === r.id && (
+                <p className="mt-2 text-xs font-medium text-destructive">{actionError.message}</p>
+              )}
             </article>
           );
         })}

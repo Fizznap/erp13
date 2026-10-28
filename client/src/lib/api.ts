@@ -164,6 +164,84 @@ export async function apiBlob(endpoint: string): Promise<Blob> {
   return res.blob();
 }
 
+/**
+ * Fetches an authenticated PDF resource for viewing or downloading.
+ * - Sends Authorization: Bearer <token> in headers (never via URL query params)
+ * - Refreshes expired token on 401
+ * - Handles 401, 403, 404, 500 cleanly by parsing error JSON or text, never treating error response bodies as PDFs
+ * - Validates PDF signature (%PDF-)
+ * - Returns a Blob typed with "application/pdf"
+ */
+export async function fetchResourcePdf(
+  resourceId: string,
+  disposition: "inline" | "attachment" = "inline"
+): Promise<Blob> {
+  const endpoint = `/resources/${encodeURIComponent(resourceId)}/download?disposition=${disposition}`;
+  const request = async (token: string | null) =>
+    fetch(`${API_BASE}${endpoint}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+
+  let res = await request(getToken());
+  if (res.status === 401 && getToken()) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      res = await request(newToken);
+    } else {
+      clearTokens();
+      throw new Error("Session expired. Please log in again.");
+    }
+  }
+
+  if (!res.ok) {
+    let errorMessage = "";
+    try {
+      const data = await res.json();
+      if (data && typeof data === "object" && data.error) {
+        errorMessage = String(data.error);
+      }
+    } catch {
+      try {
+        const text = await res.text();
+        if (text && text.trim().length > 0 && text.trim().length < 200) {
+          errorMessage = text.trim();
+        }
+      } catch {
+        // fallback
+      }
+    }
+
+    if (res.status === 401) {
+      throw new Error("Session expired. Please log in again.");
+    }
+    if (res.status === 403) {
+      throw new Error(errorMessage || "You do not have permission to access this resource.");
+    }
+    if (res.status === 404) {
+      throw new Error(errorMessage || "Resource not found or file is no longer available.");
+    }
+    throw new Error(errorMessage || `Failed to fetch resource (HTTP ${res.status})`);
+  }
+
+  const arrayBuffer = await res.arrayBuffer();
+
+  // Validate PDF magic bytes: %PDF- (0x25, 0x50, 0x44, 0x46, 0x2D)
+  const header = new Uint8Array(arrayBuffer.slice(0, 5));
+  const isPdf =
+    header.length >= 5 &&
+    header[0] === 0x25 && // %
+    header[1] === 0x50 && // P
+    header[2] === 0x44 && // D
+    header[3] === 0x46 && // F
+    header[4] === 0x2d;   // -
+
+  if (!isPdf) {
+    throw new Error("The returned file is not a valid PDF document.");
+  }
+
+  return new Blob([arrayBuffer], { type: "application/pdf" });
+}
+
 export type Subject = {
   id: string;
   name: string;

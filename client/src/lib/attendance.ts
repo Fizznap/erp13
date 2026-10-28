@@ -4,6 +4,7 @@ export type AttendanceHistoryRecord = {
   subject_id?: string | number | null;
   subject_name?: string | null;
   status?: string | null;
+  session_date?: string | null;
 };
 
 export type AttendanceSubjectSummary = {

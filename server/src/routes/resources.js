@@ -385,13 +385,22 @@ router.get('/:id/download', authenticate, async (req, res) => {
 
     const filePath = resource.file_path;
     if (!fs.existsSync(filePath)) {
-      return res.status(404).send('File is no longer available in ephemeral storage. It may have been cleared by a server restart.');
+      return res.status(404).json({ error: 'File is no longer available in storage. It may have been cleared by a server restart.' });
     }
 
-    res.download(filePath, resource.original_name);
+    const filename = resource.original_name || resource.filename;
+    const disposition = req.query.disposition === 'inline' ? 'inline' : (req.query.disposition === 'attachment' ? 'attachment' : 'attachment');
+    if (disposition === 'inline') {
+      res.setHeader('Content-Type', resource.mime_type || 'application/pdf');
+      const safeFilename = encodeURIComponent(filename);
+      res.setHeader('Content-Disposition', `inline; filename="${safeFilename}"; filename*=UTF-8''${safeFilename}`);
+      return res.sendFile(path.resolve(filePath));
+    }
+
+    res.download(filePath, filename);
   } catch (err) {
     console.error('Download error:', err);
-    res.status(500).json({ error: 'Failed to download file' });
+    res.status(500).json({ error: 'Failed to retrieve file' });
   }
 });
 

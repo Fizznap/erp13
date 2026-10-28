@@ -217,7 +217,7 @@ function Attendance() {
           <div key={h.session_id ?? h.id} className="flex items-center justify-between gap-3 p-4">
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">{h.subject_name}</p>
-              <p className="text-xs text-muted-foreground">{new Date(h.session_date).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</p>
+              <p className="text-xs text-muted-foreground">{h.session_date ? new Date(h.session_date).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"}</p>
             </div>
             <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${h.status === 'present' ? "bg-accent text-accent-foreground" : "bg-peach text-destructive"}`}>{h.status === 'present' ? "present" : "absent"}</span>
           </div>

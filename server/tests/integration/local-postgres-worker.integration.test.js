@@ -562,11 +562,34 @@ integrationDescribe('local PostgreSQL, Redis queue, API, and standalone worker',
       .expect(200);
     expect(listedByOtherClass.body.resources.some((item) => item.id === resource.id)).toBe(false);
 
-    await request(api)
-      .get(`/api/resources/${resource.id}/download`)
+    const inlineRes = await request(api)
+      .get(`/api/resources/${resource.id}/download?disposition=inline`)
       .set('Authorization', `Bearer ${tokens.studentA}`)
       .expect(200)
       .expect('content-type', /application\/pdf/);
+    expect(inlineRes.headers['content-disposition']).toMatch(/inline;\s*filename="synthetic-networks\.pdf"/i);
+    expect(inlineRes.body.subarray(0, 5).toString('ascii')).toBe('%PDF-');
+
+    const attachmentRes = await request(api)
+      .get(`/api/resources/${resource.id}/download?disposition=attachment`)
+      .set('Authorization', `Bearer ${tokens.studentA}`)
+      .expect(200)
+      .expect('content-type', /application\/pdf/);
+    expect(attachmentRes.headers['content-disposition']).toMatch(/attachment;\s*filename="synthetic-networks\.pdf"/i);
+
+    const missingRes = await pool.query(
+      `INSERT INTO resources (subject_id, subject_offering_id, uploaded_by, filename, original_name, file_path, file_size, mime_type, kind, status)
+       VALUES ($1, $2, $3, 'missing-doc.pdf', 'missing-doc.pdf', $4, 1024, 'application/pdf', 'Notes', 'ready')
+       RETURNING id`,
+      [subjectA, offeringA, facultyA, path.join(uploadDir, 'non-existent-wiped.pdf')]
+    );
+    fixtures.resourceIds.push(missingRes.rows[0].id);
+    const missingDownload = await request(api)
+      .get(`/api/resources/${missingRes.rows[0].id}/download?disposition=inline`)
+      .set('Authorization', `Bearer ${tokens.studentA}`)
+      .expect(404);
+    expect(missingDownload.body.error).toMatch(/no longer available in storage/i);
+
     await request(api)
       .get(`/api/resources/${resource.id}/download`)
       .set('Authorization', `Bearer ${tokens.studentB}`)
