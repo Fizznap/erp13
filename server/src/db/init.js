@@ -49,6 +49,7 @@ async function initDatabase() {
       'utf-8'
     );
     await pool.query(academicResultsMigration);
+    await pool.query('ALTER TABLE academic_results ALTER COLUMN grade_points TYPE NUMERIC(4,2);').catch(() => {});
     console.log('Academic results schema is up to date.');
 
     const attendanceCorrectionsMigration = fs.readFileSync(

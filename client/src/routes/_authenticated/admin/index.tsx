@@ -11,6 +11,8 @@ import {
   FileText,
   Settings,
   ChevronRight,
+  AlertCircle,
+  RotateCcw,
 } from "lucide-react";
 import { AppShell } from "@/components/snippet/AppShell";
 import { useMe } from "@/hooks/use-auth";
@@ -35,10 +37,10 @@ export const Route = createFileRoute("/_authenticated/admin/")({
 });
 
 type AdminStats = {
-  users: Array<{ role: string; count: string }>;
-  subjects: number;
-  resources: Array<{ status: string; count: string }>;
-  queries: {
+  users?: Array<{ role: string; count: string }>;
+  subjects?: number;
+  resources?: Array<{ status: string; count: string }>;
+  queries?: {
     total_queries: string;
     found_count: string;
     not_found_count: string;
@@ -46,12 +48,13 @@ type AdminStats = {
   };
 };
 
-function AdminDashboard() {
+export function AdminDashboard() {
   const { me, loading } = useMe();
+  const isAdmin = Boolean(me?.isAdmin || me?.role === "admin");
 
   const stats = useQuery({
     queryKey: ["admin-stats"],
-    enabled: !!me?.isAdmin,
+    enabled: isAdmin,
     queryFn: async () => {
       const data = await api<AdminStats>("/admin/stats");
       return data;
@@ -66,7 +69,7 @@ function AdminDashboard() {
     );
   }
 
-  if (!me?.isAdmin) {
+  if (!isAdmin) {
     return (
       <AppShell>
         <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
@@ -88,12 +91,14 @@ function AdminDashboard() {
   }
 
   const studentCount =
-    stats.data?.users.find((u) => u.role === "student")?.count || "0";
+    stats.data?.users?.find((u) => u.role === "student")?.count || "0";
   const facultyCount =
-    stats.data?.users.find((u) => u.role === "faculty")?.count || "0";
-  const resourceCount = stats.data?.resources
+    stats.data?.users?.find((u) => u.role === "faculty")?.count || "0";
+  const resourceCount = (stats.data?.resources || [])
     .filter((r) => r.status === "ready")
-    .reduce((sum, r) => sum + parseInt(r.count || "0"), 0);
+    .reduce((sum, r) => sum + parseInt(r.count || "0", 10), 0);
+  const subjectBadge =
+    stats.data?.subjects != null ? String(stats.data.subjects) : null;
 
   const adminSections = [
     {
@@ -101,14 +106,14 @@ function AdminDashboard() {
       icon: Users,
       description: "Manage student accounts and class assignments",
       href: "/admin/students",
-      badge: studentCount,
+      badge: stats.isLoading ? null : studentCount,
     },
     {
       title: "Faculty Accounts",
       icon: GraduationCap,
       description: "Activate and manage faculty members",
       href: "/admin/faculty",
-      badge: facultyCount,
+      badge: stats.isLoading ? null : facultyCount,
     },
     {
       title: "Academic Structure",
@@ -122,7 +127,7 @@ function AdminDashboard() {
       icon: Calendar,
       description: "Create subjects and assign to classes",
       href: "/admin/subjects",
-      badge: stats.data?.subjects.toString() || "0",
+      badge: stats.isLoading ? null : subjectBadge,
     },
     {
       title: "Attendance Management",
@@ -134,7 +139,7 @@ function AdminDashboard() {
     {
       title: "Academic Results",
       icon: FileText,
-      description: "Manage student grades and SGPA",
+      description: "Manage student grades, results and SGPA",
       href: "/admin/results",
       badge: null,
     },
@@ -168,18 +173,41 @@ function AdminDashboard() {
         <span className="h-11 w-11" />
       </header>
 
+      {/* Recoverable error banner if stats API fails */}
+      {stats.isError && (
+        <div className="mt-4 flex items-center justify-between rounded-2xl border border-destructive/30 bg-destructive/10 p-3.5 text-xs text-destructive">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>Could not load institutional statistics.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => stats.refetch()}
+            className="press inline-flex items-center gap-1 rounded-full bg-destructive/20 px-2.5 py-1 text-[11px] font-semibold text-destructive hover:bg-destructive/30"
+          >
+            <RotateCcw className="h-3 w-3" /> Retry
+          </button>
+        </div>
+      )}
+
       {/* Quick Stats */}
       <div className="mt-6 grid grid-cols-3 gap-3">
         <div className="surface rounded-2xl p-4 text-center">
-          <p className="text-2xl font-bold">{studentCount}</p>
+          <p className="text-2xl font-bold">
+            {stats.isLoading ? "—" : studentCount}
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">Students</p>
         </div>
         <div className="surface rounded-2xl p-4 text-center">
-          <p className="text-2xl font-bold">{facultyCount}</p>
+          <p className="text-2xl font-bold">
+            {stats.isLoading ? "—" : facultyCount}
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">Faculty</p>
         </div>
         <div className="surface rounded-2xl p-4 text-center">
-          <p className="text-2xl font-bold">{resourceCount}</p>
+          <p className="text-2xl font-bold">
+            {stats.isLoading ? "—" : resourceCount}
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">Resources</p>
         </div>
       </div>

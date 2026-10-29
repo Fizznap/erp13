@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS academic_results (
     
     -- Grade and status
     grade                   VARCHAR(2) CHECK (grade IN ('O', 'A+', 'A', 'B+', 'B', 'C', 'P', 'F', 'AB', 'XX')),
-    grade_points            NUMERIC(3,2) CHECK (grade_points >= 0 AND grade_points <= 10),
+    grade_points            NUMERIC(4,2) CHECK (grade_points >= 0 AND grade_points <= 10),
     credits                 NUMERIC(3,1) NOT NULL DEFAULT 4.0 CHECK (credits >= 0 AND credits <= 10),
     status                  VARCHAR(20) DEFAULT 'published' CHECK (status IN ('draft', 'published', 'withheld')),
     
@@ -44,6 +44,9 @@ CREATE INDEX IF NOT EXISTS idx_results_class ON academic_results(academic_class_
 CREATE INDEX IF NOT EXISTS idx_results_status ON academic_results(status);
 CREATE INDEX IF NOT EXISTS idx_results_year ON academic_results(academic_year);
 CREATE INDEX IF NOT EXISTS idx_results_synthetic ON academic_results(is_synthetic) WHERE is_synthetic = true;
+
+-- Ensure existing tables are migrated if already created
+ALTER TABLE academic_results ALTER COLUMN grade_points TYPE NUMERIC(4,2);
 
 -- Grade point mapping (reference)
 -- O  = 10.0 (90-100%)
@@ -75,7 +78,7 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 
 -- Function to get grade points from grade
 CREATE OR REPLACE FUNCTION grade_to_points(grade_letter VARCHAR(2))
-RETURNS NUMERIC(3,2) AS $$
+RETURNS NUMERIC(4,2) AS $$
 BEGIN
     CASE grade_letter
         WHEN 'O'  THEN RETURN 10.0;

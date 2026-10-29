@@ -14,4 +14,17 @@ describe("App routing", () => {
 
     expect(matches.at(-1)?.routeId).not.toBe(rootRouteId);
   });
+
+  it("matches admin index and child routes without root fallback", () => {
+    const router = createRouter({ routeTree, context: { queryClient: new QueryClient() } });
+
+    const adminMatches = router.matchRoutes("/admin");
+    expect(adminMatches.at(-1)?.routeId).toBe("/_authenticated/admin/");
+
+    const adminResultsMatches = router.matchRoutes("/admin/results");
+    expect(adminResultsMatches.at(-1)?.routeId).toBe("/_authenticated/admin/results");
+
+    const studentResultsMatches = router.matchRoutes("/results");
+    expect(studentResultsMatches.at(-1)?.routeId).toBe("/_authenticated/results");
+  });
 });

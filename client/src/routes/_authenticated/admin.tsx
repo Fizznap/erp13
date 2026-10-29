@@ -1,4 +1,4 @@
-import { createFileRoute, Navigate } from "@tanstack/react-router";
+import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { useMe } from "@/hooks/use-auth";
 import { AppShell } from "@/components/snippet/AppShell";
 
@@ -11,10 +11,10 @@ export const Route = createFileRoute("/_authenticated/admin")({
       { name: "description", content: "Campus ERP administration dashboard." },
     ],
   }),
-  component: Admin,
+  component: AdminLayout,
 });
 
-function Admin() {
+function AdminLayout() {
   const { me, loading } = useMe();
 
   if (loading) {
@@ -35,6 +35,5 @@ function Admin() {
     );
   }
 
-  // Redirect to the new admin dashboard
-  return <Navigate to="/admin/" />;
+  return <Outlet />;
 }

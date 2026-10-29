@@ -47,6 +47,126 @@ function sanitizeResult(result) {
 }
 
 /**
+ * GET /api/results
+ * List results with optional filters (admin and faculty)
+ */
+router.get('/', authenticate, requireRole(['admin', 'faculty']), async (req, res) => {
+  try {
+    const { classId, subjectId, status, studentId, academicYear, limit = 100, offset = 0 } = req.query;
+
+    let whereConditions = [];
+    let params = [];
+    let paramCount = 1;
+
+    // Faculty scope: only results for subjects/classes they teach
+    if (req.user.role === 'faculty') {
+      whereConditions.push(`ar.academic_class_id IN (
+        SELECT academic_class_id FROM subject_offerings WHERE faculty_id = $${paramCount}
+      )`);
+      params.push(req.user.id);
+      paramCount++;
+    }
+
+    if (classId) {
+      whereConditions.push(`ar.academic_class_id = $${paramCount}`);
+      params.push(classId);
+      paramCount++;
+    }
+
+    if (subjectId) {
+      whereConditions.push(`ar.subject_id = $${paramCount}`);
+      params.push(subjectId);
+      paramCount++;
+    }
+
+    if (status) {
+      whereConditions.push(`ar.status = $${paramCount}`);
+      params.push(status);
+      paramCount++;
+    }
+
+    if (academicYear) {
+      whereConditions.push(`ar.academic_year = $${paramCount}`);
+      params.push(parseInt(academicYear, 10));
+      paramCount++;
+    }
+
+    if (studentId) {
+      // Support studentId as UUID or roll number
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(studentId);
+      if (isUuid) {
+        whereConditions.push(`ar.student_id = $${paramCount}`);
+        params.push(studentId);
+        paramCount++;
+      } else {
+        whereConditions.push(`(LOWER(up.roll_number) = LOWER($${paramCount}) OR LOWER(u.email) = LOWER($${paramCount}))`);
+        params.push(studentId);
+        paramCount++;
+      }
+    }
+
+    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+    const listQuery = `
+      SELECT ar.*, s.name as subject_name, s.code as subject_code,
+             u.full_name as student_name, up.roll_number,
+             br.code as branch_code, d.name as division_name, sem.number as semester_number
+      FROM academic_results ar
+      JOIN subjects s ON s.id = ar.subject_id
+      JOIN users u ON u.id = ar.student_id
+      LEFT JOIN user_profiles up ON up.user_id = ar.student_id
+      LEFT JOIN academic_classes ac ON ac.id = ar.academic_class_id
+      LEFT JOIN branches br ON br.id = ac.branch_id
+      LEFT JOIN divisions d ON d.id = ac.division_id
+      LEFT JOIN semesters sem ON sem.id = ac.semester_id
+      ${whereClause}
+      ORDER BY ar.created_at DESC
+      LIMIT $${paramCount} OFFSET $${paramCount + 1}
+    `;
+
+    const countQuery = `
+      SELECT 
+        COUNT(*) as total_count,
+        COUNT(*) FILTER (WHERE ar.status = 'published') as published_count,
+        COUNT(*) FILTER (WHERE ar.status = 'draft') as draft_count,
+        COUNT(*) FILTER (WHERE ar.status = 'withheld') as withheld_count
+      FROM academic_results ar
+      JOIN users u ON u.id = ar.student_id
+      LEFT JOIN user_profiles up ON up.user_id = ar.student_id
+      ${whereClause}
+    `;
+
+    const [rowsResult, countResult] = await Promise.all([
+      pool.query(listQuery, [...params, parseInt(limit, 10), parseInt(offset, 10)]),
+      pool.query(countQuery, params),
+    ]);
+
+    const results = rowsResult.rows.map(r => ({
+      ...sanitizeResult(r),
+      studentName: r.student_name,
+      rollNumber: r.roll_number,
+      branchCode: r.branch_code,
+      divisionName: r.division_name,
+      semesterNumber: r.semester_number,
+    }));
+
+    const counts = countResult.rows[0] || { total_count: '0', published_count: '0', draft_count: '0', withheld_count: '0' };
+
+    res.json({
+      results,
+      count: results.length,
+      totalCount: parseInt(counts.total_count || '0', 10),
+      publishedCount: parseInt(counts.published_count || '0', 10),
+      draftCount: parseInt(counts.draft_count || '0', 10),
+      withheldCount: parseInt(counts.withheld_count || '0', 10),
+    });
+  } catch (err) {
+    console.error('List results error:', err);
+    res.status(500).json({ error: 'Could not fetch results' });
+  }
+});
+
+/**
  * GET /api/results/student/:studentId
  * Get all results for a student (admin/faculty can see any, students can only see their own)
  */
@@ -54,24 +174,40 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
   try {
     const { studentId } = req.params;
     const { semester, academicYear, status } = req.query;
-    
+
+    let targetStudentId = studentId;
+
     // Authorization: students can only view their own results
-    if (req.user.role === 'student' && req.user.id !== studentId) {
-      return res.status(403).json({ error: 'You can only view your own results' });
+    if (req.user.role === 'student') {
+      if (req.user.id !== studentId) {
+        return res.status(403).json({ error: 'You can only view your own results' });
+      }
+    } else {
+      // For admin / faculty: resolve studentId if it's a roll number or email
+      const isRollOrEmail = studentId.includes('@') || (/^[A-Za-z0-9_]+$/.test(studentId) && !studentId.includes('-'));
+      if (isRollOrEmail) {
+        const userLookup = await pool.query(
+          `SELECT u.id FROM users u
+           LEFT JOIN user_profiles up ON up.user_id = u.id
+           WHERE LOWER(up.roll_number) = LOWER($1) OR LOWER(u.email) = LOWER($1)`,
+          [studentId]
+        );
+        if (userLookup.rows.length === 0) {
+          return res.status(404).json({ error: 'Student not found with this roll number or email' });
+        }
+        targetStudentId = userLookup.rows[0].id;
+      }
     }
-    
-    // Faculty can only view results for their subjects (not implemented in this version - allow all)
-    // Admin can view all results
-    
+
     let query = `
       SELECT ar.*, s.name as subject_name, s.code as subject_code
       FROM academic_results ar
       JOIN subjects s ON s.id = ar.subject_id
       WHERE ar.student_id = $1
     `;
-    const params = [studentId];
+    const params = [targetStudentId];
     let paramCount = 2;
-    
+
     // Filter by status (students only see 'published')
     if (req.user.role === 'student') {
       query += ` AND ar.status = 'published'`;
@@ -80,14 +216,14 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
       params.push(status);
       paramCount++;
     }
-    
+
     // Filter by academic year
     if (academicYear) {
       query += ` AND ar.academic_year = $${paramCount}`;
-      params.push(parseInt(academicYear));
+      params.push(parseInt(academicYear, 10));
       paramCount++;
     }
-    
+
     // Filter by semester (via academic_classes)
     if (semester) {
       query += ` AND ar.academic_class_id IN (
@@ -95,15 +231,15 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
           SELECT id FROM semesters WHERE number = $${paramCount}
         )
       )`;
-      params.push(parseInt(semester));
+      params.push(parseInt(semester, 10));
       paramCount++;
     }
-    
+
     query += ` ORDER BY ar.academic_year DESC, ar.created_at DESC`;
-    
+
     const result = await pool.query(query, params);
     const results = result.rows.map(sanitizeResult);
-    
+
     // Calculate semester-wise SGPA
     const semesterGroups = {};
     for (const r of result.rows) {
@@ -111,21 +247,23 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
       if (!semesterGroups[key]) semesterGroups[key] = [];
       semesterGroups[key].push(r);
     }
-    
+
     const sgpaData = Object.entries(semesterGroups).map(([key, semResults]) => ({
       academicYear: semResults[0].academic_year,
       academicClassId: semResults[0].academic_class_id,
       sgpa: calculateSGPA(semResults),
       resultCount: semResults.length,
     }));
-    
-    // Calculate overall CGPA
+
+    // Calculate overall CGPA and total earned credits
     const cgpa = calculateSGPA(result.rows);
-    
+    const totalCredits = results.reduce((sum, r) => sum + (Number(r.credits) || 0), 0);
+
     res.json({
       results,
       summary: {
         totalResults: results.length,
+        totalCredits,
         sgpaData,
         cgpa,
       },
@@ -204,6 +342,7 @@ router.post('/', authenticate, requireRole(['admin', 'faculty']), async (req, re
       academicYear,
       remarks,
       isSynthetic = false,
+      status = 'draft',
     } = req.body;
     
     // Validation
@@ -214,6 +353,25 @@ router.post('/', authenticate, requireRole(['admin', 'faculty']), async (req, re
     if (credits !== undefined && (credits < 0 || credits > 10)) {
       return res.status(400).json({ error: 'Credits must be between 0 and 10' });
     }
+
+    if (internalMarks !== undefined && internalMarks !== null && (Number(internalMarks) < 0 || Number(internalMarks) > 100)) {
+      return res.status(400).json({ error: 'Internal marks must be between 0 and 100' });
+    }
+    if (externalMarks !== undefined && externalMarks !== null && (Number(externalMarks) < 0 || Number(externalMarks) > 100)) {
+      return res.status(400).json({ error: 'External marks must be between 0 and 100' });
+    }
+
+    const computedTotal = (totalMarks !== undefined && totalMarks !== null && totalMarks !== '')
+      ? Number(totalMarks)
+      : (internalMarks !== undefined && internalMarks !== null || externalMarks !== undefined && externalMarks !== null)
+        ? (Number(internalMarks) || 0) + (Number(externalMarks) || 0)
+        : null;
+
+    if (computedTotal !== null && (computedTotal < 0 || computedTotal > 100)) {
+      return res.status(400).json({ error: 'Total marks must be between 0 and 100' });
+    }
+
+    const resultStatus = ['draft', 'published', 'withheld'].includes(status) ? status : 'draft';
     
     // Check if result already exists
     const existingResult = await pool.query(
@@ -232,15 +390,15 @@ router.post('/', authenticate, requireRole(['admin', 'faculty']), async (req, re
        (student_id, subject_id, academic_class_id, internal_marks, external_marks, 
         total_marks, grade, credits, exam_type, academic_year, remarks, is_synthetic, 
         created_by, updated_by, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13, 'draft')
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13, $14)
        RETURNING *`,
       [
         studentId,
         subjectId,
         academicClassId,
-        internalMarks || null,
-        externalMarks || null,
-        totalMarks || null,
+        internalMarks !== undefined && internalMarks !== null ? Number(internalMarks) : null,
+        externalMarks !== undefined && externalMarks !== null ? Number(externalMarks) : null,
+        computedTotal,
         grade || null,
         credits || 4.0,
         examType,
@@ -248,6 +406,7 @@ router.post('/', authenticate, requireRole(['admin', 'faculty']), async (req, re
         remarks || null,
         isSynthetic,
         req.user.id,
+        resultStatus,
       ]
     );
     

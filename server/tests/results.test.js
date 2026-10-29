@@ -495,4 +495,98 @@ describe('Results API', () => {
       expect(response.status).toBe(403);
     });
   });
+
+  describe('GET /api/results (Admin overview and listing)', () => {
+    it('should allow admin to list results with live status metrics', async () => {
+      mockPool.query
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'r-1',
+              student_id: 's-1',
+              subject_id: 'sub-1',
+              academic_class_id: 'c-1',
+              subject_name: 'Computer Networks',
+              subject_code: 'CS301',
+              student_name: 'Smit Haria',
+              roll_number: 'UST24R0102086',
+              total_marks: 84,
+              grade: 'A+',
+              grade_points: 9.0,
+              credits: 4.0,
+              status: 'published',
+              exam_type: 'regular',
+              academic_year: 2024,
+              is_synthetic: true,
+              created_at: new Date(),
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              total_count: '12',
+              published_count: '10',
+              draft_count: '2',
+              withheld_count: '0',
+            },
+          ],
+        });
+
+      const response = await request(app)
+        .get('/api/results?limit=50')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.results).toHaveLength(1);
+      expect(response.body.totalCount).toBe(12);
+      expect(response.body.publishedCount).toBe(10);
+      expect(response.body.draftCount).toBe(2);
+      expect(response.body.withheldCount).toBe(0);
+    });
+
+    it('should reject student access to top-level /api/results', async () => {
+      const response = await request(app)
+        .get('/api/results')
+        .set('Authorization', `Bearer ${studentToken}`);
+
+      expect(response.status).toBe(403);
+    });
+
+    it('should resolve student by roll number and return totalCredits in summary', async () => {
+      mockPool.query
+        .mockResolvedValueOnce({
+          rows: [{ id: 'resolved-student-uuid' }],
+        })
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'res-1',
+              student_id: 'resolved-student-uuid',
+              subject_id: 'sub-1',
+              academic_class_id: 'c-1',
+              subject_name: 'Computer Networks',
+              subject_code: 'CS301',
+              total_marks: 92,
+              grade: 'O',
+              grade_points: 10.0,
+              credits: 4.0,
+              status: 'published',
+              exam_type: 'regular',
+              academic_year: 2024,
+              created_at: new Date(),
+            },
+          ],
+        });
+
+      const response = await request(app)
+        .get('/api/results/student/UST24R0102087')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.results).toHaveLength(1);
+      expect(response.body.summary.totalCredits).toBe(4);
+      expect(response.body.summary.cgpa).toBe('10.00');
+    });
+  });
 });
