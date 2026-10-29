@@ -30,12 +30,17 @@ function sanitizeResult(result) {
     academicClassId: result.academic_class_id,
     subjectName: result.subject_name,
     subjectCode: result.subject_code,
-    internalMarks: result.internal_marks,
-    externalMarks: result.external_marks,
-    totalMarks: result.total_marks,
+    studentName: result.student_name,
+    rollNumber: result.roll_number,
+    branchCode: result.branch_code,
+    divisionName: result.division_name,
+    semesterNumber: result.semester_number,
+    internalMarks: result.internal_marks != null ? Number(result.internal_marks) : null,
+    externalMarks: result.external_marks != null ? Number(result.external_marks) : null,
+    totalMarks: result.total_marks != null ? Number(result.total_marks) : null,
     grade: result.grade,
-    gradePoints: result.grade_points,
-    credits: result.credits,
+    gradePoints: Number(result.grade_points) || 0,
+    credits: Number(result.credits) || 0,
     status: result.status,
     examType: result.exam_type,
     academicYear: result.academic_year,
@@ -200,9 +205,17 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
     }
 
     let query = `
-      SELECT ar.*, s.name as subject_name, s.code as subject_code
+      SELECT ar.*, s.name as subject_name, s.code as subject_code,
+             sem.number as semester_number, br.code as branch_code, br.name as branch_name,
+             bt.start_year as batch_start_year, bt.end_year as batch_end_year,
+             d.name as division_name
       FROM academic_results ar
       JOIN subjects s ON s.id = ar.subject_id
+      LEFT JOIN academic_classes ac ON ac.id = ar.academic_class_id
+      LEFT JOIN semesters sem ON sem.id = ac.semester_id
+      LEFT JOIN branches br ON br.id = ac.branch_id
+      LEFT JOIN batches bt ON bt.id = ac.batch_id
+      LEFT JOIN divisions d ON d.id = ac.division_id
       WHERE ar.student_id = $1
     `;
     const params = [targetStudentId];
@@ -240,7 +253,7 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
     const result = await pool.query(query, params);
     const results = result.rows.map(sanitizeResult);
 
-    // Calculate semester-wise SGPA
+    // Calculate semester-wise SGPA and structured terms
     const semesterGroups = {};
     for (const r of result.rows) {
       const key = `${r.academic_year}-${r.academic_class_id}`;
@@ -255,17 +268,54 @@ router.get('/student/:studentId', authenticate, async (req, res) => {
       resultCount: semResults.length,
     }));
 
+    const terms = Object.entries(semesterGroups).map(([key, semResults]) => {
+      const first = semResults[0];
+      const semNum = first.semester_number || 5;
+      const batchYears = first.batch_start_year && first.batch_end_year
+        ? `${first.batch_start_year}–${String(first.batch_end_year).slice(-2)}`
+        : '2024–28';
+      const academicYear = first.academic_year || 2024;
+      const termTitle = `ODD Term AY ${academicYear}–${String(academicYear + 1).slice(-2)}`;
+
+      const earnedCredits = semResults
+        .filter((r) => r.grade !== 'F' && r.grade !== 'AB')
+        .reduce((sum, r) => sum + (Number(r.credits) || 0), 0);
+
+      return {
+        termId: key,
+        termTitle,
+        semesterNumber: semNum,
+        academicYear,
+        batch: `Batch ${batchYears}`,
+        divisionName: first.division_name || 'B',
+        branchCode: first.branch_code || 'BTECH-CSE',
+        branchName: first.branch_name || 'Computer Science and Engineering',
+        declarationDate: first.created_at,
+        status: first.status,
+        sgpa: calculateSGPA(semResults),
+        earnedCredits,
+        totalCourses: semResults.length,
+        results: semResults.map(sanitizeResult),
+      };
+    });
+
     // Calculate overall CGPA and total earned credits
     const cgpa = calculateSGPA(result.rows);
-    const totalCredits = results.reduce((sum, r) => sum + (Number(r.credits) || 0), 0);
+    const totalCredits = results
+      .filter((r) => r.grade !== 'F' && r.grade !== 'AB')
+      .reduce((sum, r) => sum + (Number(r.credits) || 0), 0);
+    const declaredTermsCount = terms.filter((t) => t.status === 'published').length;
 
     res.json({
       results,
+      terms,
       summary: {
         totalResults: results.length,
         totalCredits,
         sgpaData,
         cgpa,
+        declaredTermsCount,
+        pendingTermsCount: 0,
       },
     });
   } catch (err) {

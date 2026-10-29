@@ -1,4 +1,5 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
 const { pool } = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 
@@ -42,6 +43,76 @@ router.get('/users', authenticate, authorize('admin'), async (req, res) => {
   } catch (err) {
     console.error('List users error:', err);
     res.status(500).json({ error: 'Failed to list users' });
+  }
+});
+
+// POST /api/admin/faculty — create faculty account
+router.post('/faculty', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { fullName, email: rawEmail, password, department, subjectOfferingId } = req.body || {};
+    const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : '';
+
+    if (!email || !fullName?.trim() || !password) {
+      return res.status(400).json({ error: 'Full name, email, and password are required' });
+    }
+
+    if (!email.includes('@') || email.length > 255) {
+      return res.status(400).json({ error: 'Please enter a valid email address' });
+    }
+
+    if (typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
+    // Check duplicate
+    const existing = await pool.query('SELECT id FROM users WHERE LOWER(TRIM(email)) = $1', [email]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'A user account with this email already exists' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const userRes = await client.query(
+        `INSERT INTO users (email, password_hash, full_name, role, is_active, email_verified, created_at, updated_at)
+         VALUES ($1, $2, $3, 'faculty', true, true, now(), now())
+         RETURNING id, email, full_name, role, is_active, created_at`,
+        [email, passwordHash, fullName.trim()]
+      );
+      const newUser = userRes.rows[0];
+
+      // Create faculty profile
+      await client.query(
+        `INSERT INTO user_profiles (user_id, program, registration_completed_at, created_at, updated_at)
+         VALUES ($1, $2, now(), now(), now())
+         ON CONFLICT (user_id) DO UPDATE SET program = EXCLUDED.program, updated_at = now()`,
+        [newUser.id, department?.trim() || 'Faculty Department']
+      );
+
+      // Optionally assign to subject offering
+      if (subjectOfferingId) {
+        await client.query(
+          `UPDATE subject_offerings SET faculty_id = $1 WHERE id = $2`,
+          [newUser.id, subjectOfferingId]
+        );
+      }
+
+      await client.query('COMMIT');
+      res.status(201).json({
+        message: 'Faculty account created successfully',
+        faculty: newUser,
+      });
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Create faculty error:', err);
+    res.status(500).json({ error: 'Failed to create faculty account' });
   }
 });
 

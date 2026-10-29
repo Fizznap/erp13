@@ -522,13 +522,16 @@ router.post('/records/:recordId/correct', authenticate, authorize('faculty', 'ad
   }
 });
 
-// PUT /api/attendance/:sessionId/roster/:studentId — faculty can correct attendance later.
+// PUT /api/attendance/:sessionId/roster/:studentId — faculty or admin can correct attendance later.
 router.put('/:sessionId/roster/:studentId', authenticate, authorize('faculty', 'admin'), async (req, res) => {
   try {
     const { status, note = '', reason = '' } = req.body || {};
-    const correctionReason = (reason || note || '').trim();
-    if (!['present', 'absent'].includes(status) || typeof correctionReason !== 'string' || correctionReason.length > 255) {
-      return res.status(400).json({ error: 'Status must be present or absent and note must be 255 characters or fewer' });
+    const correctionReason = (reason || note || 'Manual attendance correction').trim();
+    if (!['present', 'absent'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be present or absent' });
+    }
+    if (correctionReason.length > 255) {
+      return res.status(400).json({ error: 'Correction reason must be 255 characters or fewer' });
     }
     const session = await loadSessionScope(req.params.sessionId);
     if (!session) return res.status(404).json({ error: 'Session not found' });
@@ -544,7 +547,7 @@ router.put('/:sessionId/roster/:studentId', authenticate, authorize('faculty', '
       `INSERT INTO attendance_records
        (session_id, student_id, latitude, longitude, distance_meters, status, rejection_reason, verification_method,
         corrected_by, corrected_at, correction_reason, original_status)
-       VALUES ($1, $2, 0, 0, 0, $3, $4, 'faculty_manual', $5, now(), $6, $3)
+       VALUES ($1, $2, 0, 0, 0, $3, $4, 'faculty_manual', $5, now(), $6, 'absent')
        ON CONFLICT (session_id, student_id) DO UPDATE SET
          status = EXCLUDED.status,
          rejection_reason = EXCLUDED.rejection_reason,
@@ -560,9 +563,9 @@ router.put('/:sessionId/roster/:studentId', authenticate, authorize('faculty', '
         req.params.sessionId,
         req.params.studentId,
         status,
-        correctionReason || null,
+        correctionReason,
         req.user.id,
-        correctionReason || null,
+        correctionReason,
       ]
     );
     res.json({ student: result.rows[0] });
@@ -572,31 +575,48 @@ router.put('/:sessionId/roster/:studentId', authenticate, authorize('faculty', '
   }
 });
 
-// GET /api/attendance/sessions?subjectOfferingId=X — list sessions
+// GET /api/attendance/sessions?subjectOfferingId=X or classId=Y — list sessions
 router.get('/sessions', authenticate, authorize('faculty', 'admin'), async (req, res) => {
   try {
-    const { subjectOfferingId, subjectId } = req.query;
-    if (!subjectOfferingId && !subjectId) {
-      return res.status(400).json({ error: 'subjectOfferingId or subjectId is required' });
+    const { subjectOfferingId, subjectId, classId } = req.query;
+    if (!subjectOfferingId && !subjectId && !classId) {
+      return res.status(400).json({ error: 'subjectOfferingId, subjectId, or classId is required' });
     }
 
     let result;
-    if (subjectOfferingId) {
+    if (classId) {
       result = await pool.query(
-        `SELECT a.*,
+        `SELECT a.*, s.name AS subject_name, s.code AS subject_code,
                 (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'present') AS present_count,
-                (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'rejected') AS rejected_count
+                (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'rejected') AS rejected_count,
+                (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id) AS total_count
          FROM attendance_sessions a
+         JOIN subject_offerings so ON so.id = a.subject_offering_id
+         JOIN subjects s ON s.id = so.subject_id
+         WHERE so.academic_class_id = $1 AND ($2 = 'admin' OR a.faculty_id = $3)
+         ORDER BY a.started_at DESC`,
+        [classId, req.user.role, req.user.id]
+      );
+    } else if (subjectOfferingId) {
+      result = await pool.query(
+        `SELECT a.*, s.name AS subject_name, s.code AS subject_code,
+                (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'present') AS present_count,
+                (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'rejected') AS rejected_count,
+                (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id) AS total_count
+         FROM attendance_sessions a
+         JOIN subjects s ON s.id = a.subject_id
          WHERE a.subject_offering_id = $1 AND ($2 = 'admin' OR a.faculty_id = $3)
          ORDER BY a.started_at DESC`,
         [subjectOfferingId, req.user.role, req.user.id]
       );
     } else {
       result = await pool.query(
-        `SELECT a.*,
+        `SELECT a.*, s.name AS subject_name, s.code AS subject_code,
                 (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'present') AS present_count,
-                (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'rejected') AS rejected_count
+                (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id AND status = 'rejected') AS rejected_count,
+                (SELECT COUNT(*) FROM attendance_records WHERE session_id = a.id) AS total_count
          FROM attendance_sessions a
+         JOIN subjects s ON s.id = a.subject_id
          WHERE a.subject_id = $1 AND ($2 = 'admin' OR a.faculty_id = $3)
          ORDER BY a.started_at DESC`,
         [subjectId, req.user.role, req.user.id]
@@ -606,6 +626,149 @@ router.get('/sessions', authenticate, authorize('faculty', 'admin'), async (req,
   } catch (err) {
     console.error('List sessions error:', err);
     res.status(500).json({ error: 'Failed to list sessions' });
+  }
+});
+
+function toRoman(num) {
+  const map = { 1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V', 6: 'VI', 7: 'VII', 8: 'VIII' };
+  return map[num] || String(num);
+}
+
+// GET /api/attendance/my/overview — semester-wise and subject-wise breakdown for authenticated student
+router.get('/my/overview', authenticate, authorize('student'), async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const requestedSemester = req.query.semester ? parseInt(req.query.semester, 10) : null;
+
+    // 1. Fetch student's class and hierarchy
+    const studentUser = await pool.query(
+      `SELECT u.id, u.academic_class_id, p.academic_lab_group_id,
+              ac.branch_id, ac.batch_id, ac.division_id, ac.semester_id,
+              br.code AS branch_code, br.name AS branch_name,
+              ba.start_year AS batch_start_year, ba.end_year AS batch_end_year,
+              d.name AS division_name, s.number AS current_semester_number
+       FROM users u
+       LEFT JOIN user_profiles p ON p.user_id = u.id
+       LEFT JOIN academic_classes ac ON ac.id = u.academic_class_id
+       LEFT JOIN branches br ON br.id = ac.branch_id
+       LEFT JOIN batches ba ON ba.id = ac.batch_id
+       LEFT JOIN divisions d ON d.id = ac.division_id
+       LEFT JOIN semesters s ON s.id = ac.semester_id
+       WHERE u.id = $1`,
+      [studentId]
+    );
+
+    if (studentUser.rows.length === 0 || !studentUser.rows[0].branch_id) {
+      return res.json({
+        semesters: [],
+        selectedSemester: null,
+        overall: { percentage: 0, attended: 0, total: 0 },
+        subjects: [],
+      });
+    }
+
+    const studentInfo = studentUser.rows[0];
+
+    // 2. Fetch all semesters applicable to the student's branch and batch
+    const semQuery = await pool.query(
+      `SELECT DISTINCT s.number AS semester_number, ac.id AS academic_class_id
+       FROM academic_classes ac
+       JOIN semesters s ON s.id = ac.semester_id
+       WHERE ac.branch_id = $1 AND ac.batch_id = $2 AND ac.division_id = $3
+       ORDER BY s.number ASC`,
+      [studentInfo.branch_id, studentInfo.batch_id, studentInfo.division_id]
+    );
+
+    const availableSemesters = semQuery.rows.map((row) => ({
+      semesterNumber: row.semester_number,
+      academicClassId: row.academic_class_id,
+      label: `Semester ${toRoman(row.semester_number)} (${studentInfo.batch_start_year}–${String(studentInfo.batch_end_year).slice(-2)})`,
+      isCurrent: row.semester_number === studentInfo.current_semester_number,
+    }));
+
+    if (availableSemesters.length === 0) {
+      availableSemesters.push({
+        semesterNumber: studentInfo.current_semester_number || 5,
+        academicClassId: studentInfo.academic_class_id,
+        label: `Semester ${toRoman(studentInfo.current_semester_number || 5)} (${studentInfo.batch_start_year || 2024}–${String(studentInfo.batch_end_year || 2028).slice(-2)})`,
+        isCurrent: true,
+      });
+    }
+
+    const selectedSemesterNumber = requestedSemester || studentInfo.current_semester_number || availableSemesters[0].semesterNumber;
+    const activeSemInfo = availableSemesters.find((s) => s.semesterNumber === selectedSemesterNumber) || availableSemesters[0];
+    const targetClassId = activeSemInfo.academicClassId || studentInfo.academic_class_id;
+
+    // 3. Fetch subjects and offerings for this class
+    const offeringsQuery = await pool.query(
+      `SELECT so.id AS offering_id, s.id AS subject_id, s.name AS subject_name, s.code AS subject_code,
+              s.description, u.full_name AS faculty_name
+       FROM subject_offerings so
+       JOIN subjects s ON s.id = so.subject_id
+       LEFT JOIN users u ON u.id = so.faculty_id
+       WHERE so.academic_class_id = $1
+       ORDER BY s.code ASC, s.name ASC`,
+      [targetClassId]
+    );
+
+    // 4. For each offering, calculate attended and total applicable sessions
+    let overallAttended = 0;
+    let overallTotal = 0;
+
+    const subjects = await Promise.all(
+      offeringsQuery.rows.map(async (offering) => {
+        const isLab = offering.subject_name.toLowerCase().includes('lab') || offering.subject_code.toUpperCase().endsWith('L');
+
+        const sessionsQuery = await pool.query(
+          `SELECT a.id,
+                  EXISTS (
+                    SELECT 1 FROM attendance_records ar
+                    WHERE ar.session_id = a.id AND ar.student_id = $1 AND ar.status = 'present'
+                  ) AS is_present
+           FROM attendance_sessions a
+           WHERE a.subject_offering_id = $2
+             AND a.is_active = false
+             AND a.ended_at IS NOT NULL
+             AND ($3::uuid IS NULL OR a.academic_lab_group_id IS NULL OR a.academic_lab_group_id = $3)`,
+          [studentId, offering.offering_id, studentInfo.academic_lab_group_id]
+        );
+
+        const totalApplicable = sessionsQuery.rows.length;
+        const attended = sessionsQuery.rows.filter((r) => r.is_present).length;
+        const percentage = totalApplicable > 0 ? Number(((attended / totalApplicable) * 100).toFixed(2)) : 0;
+
+        overallTotal += totalApplicable;
+        overallAttended += attended;
+
+        return {
+          offeringId: offering.offering_id,
+          subjectId: offering.subject_id,
+          name: offering.subject_name,
+          code: offering.subject_code,
+          isLab,
+          facultyName: offering.faculty_name,
+          attended,
+          total: totalApplicable,
+          percentage,
+        };
+      })
+    );
+
+    const overallPercentage = overallTotal > 0 ? Number(((overallAttended / overallTotal) * 100).toFixed(2)) : 0;
+
+    res.json({
+      semesters: availableSemesters,
+      selectedSemester: selectedSemesterNumber,
+      overall: {
+        percentage: overallPercentage,
+        attended: overallAttended,
+        total: overallTotal,
+      },
+      subjects,
+    });
+  } catch (err) {
+    console.error('Attendance overview error:', err);
+    res.status(500).json({ error: 'Failed to fetch attendance overview' });
   }
 });
 
