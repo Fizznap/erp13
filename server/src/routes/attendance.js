@@ -187,7 +187,7 @@ router.get('/:sessionId/nonce', authenticate, authorize('faculty', 'admin'), asy
 // POST /api/attendance/mark — student marks attendance
 router.post('/mark', authenticate, authorize('student'), async (req, res) => {
   try {
-    const { sessionId, subjectOfferingId, subjectId, nonce, latitude, longitude } = req.body;
+    const { sessionId, subjectOfferingId, subjectId, nonce, latitude, longitude, accuracy, timestamp } = req.body;
     const deviceId = req.headers['x-device-id'] || 'unknown-device';
 
     if (!(sessionId || subjectOfferingId || subjectId || nonce) || typeof nonce !== 'string' || !nonce || latitude == null || longitude == null) {
@@ -196,6 +196,29 @@ router.post('/mark', authenticate, authorize('student'), async (req, res) => {
     if (!isValidLocation(latitude, longitude)) {
       return res.status(400).json({ error: 'Latitude and longitude must be valid numeric coordinates' });
     }
+    
+    // Validate GPS accuracy (configurable, default 25m)
+    const maxAccuracyMeters = parseInt(process.env.GPS_MAX_ACCURACY_METERS) || 25;
+    if (accuracy != null && (typeof accuracy !== 'number' || accuracy > maxAccuracyMeters)) {
+      return res.status(400).json({
+        error: `GPS accuracy too low: ${Math.round(accuracy)}m (required: ${maxAccuracyMeters}m or better)`,
+        code: 'ACCURACY_TOO_LOW',
+        reportedAccuracy: Math.round(accuracy),
+        requiredAccuracy: maxAccuracyMeters,
+      });
+    }
+    
+    // Validate timestamp freshness (must be within last 60 seconds)
+    if (timestamp != null && typeof timestamp === 'number') {
+      const age = Date.now() - timestamp;
+      if (age > 60000 || age < -5000) { // Allow 5s clock skew forward
+        return res.status(400).json({
+          error: 'Location reading is too old. Get a fresh location and try again.',
+          code: 'STALE_LOCATION',
+        });
+      }
+    }
+    
     const locHash = crypto.createHash('sha256').update(`${latitude},${longitude}`).digest('hex');
 
     // Get session
@@ -297,13 +320,36 @@ router.post('/mark', authenticate, authorize('student'), async (req, res) => {
       return res.status(400).json({ error: 'Nonce has expired. Please get the new code from faculty.', status: 'rejected' });
     }
 
-    // Calculate distance
+    // Calculate distance using server-side Haversine (never trust client calculation)
     const distance = haversineDistance(
       session.latitude, session.longitude,
       latitude, longitude
     );
 
-    // Check radius
+    // Check if uncertainty overlaps geofence boundary
+    // If reported accuracy is available, use it for uncertainty check
+    const uncertaintyMargin = accuracy != null ? accuracy : 0;
+    const effectiveDistance = Math.max(0, distance - uncertaintyMargin);
+    
+    // If uncertainty could place student either inside or outside, ask for better reading
+    if (accuracy != null && distance > 0 && distance < session.radius_meters + accuracy && distance > session.radius_meters) {
+      await pool.query(
+        `INSERT INTO attendance_records (session_id, student_id, latitude, longitude, distance_meters, status, rejection_reason, device_id, student_location_hash)
+         VALUES ($1, $2, $3, $4, $5, 'rejected', $6, $7, $8)`,
+        [actualSessionId, req.user.id, latitude, longitude, distance, 
+         `Uncertain: ${Math.round(distance)}m ± ${Math.round(accuracy)}m overlaps boundary. Get better accuracy and try again.`, 
+         deviceId, locHash]
+      );
+      return res.status(400).json({
+        error: `Location uncertainty overlaps boundary. Get a better GPS fix and try again.`,
+        status: 'rejected',
+        distance: Math.round(distance),
+        accuracy: Math.round(accuracy),
+        code: 'UNCERTAIN_BOUNDARY',
+      });
+    }
+
+    // Check radius (use effective distance accounting for uncertainty)
     if (distance > session.radius_meters) {
       await pool.query(
         `INSERT INTO attendance_records (session_id, student_id, latitude, longitude, distance_meters, status, rejection_reason, device_id, student_location_hash)
@@ -327,6 +373,7 @@ router.post('/mark', authenticate, authorize('student'), async (req, res) => {
     res.json({
       status: 'present',
       distance: Math.round(distance),
+      accuracy: accuracy != null ? Math.round(accuracy) : undefined,
       record: record.rows[0],
     });
   } catch (err) {

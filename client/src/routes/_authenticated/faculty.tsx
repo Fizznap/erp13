@@ -1,10 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, RefreshCw, Square, Users, Clock } from "lucide-react";
+import { ArrowLeft, RefreshCw, Square, Users, Clock, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AppShell, SectionTitle } from "@/components/snippet/AppShell";
 import { useMe } from "@/hooks/use-auth";
 import { api, fetchSubjects, SUBJECTS_QUERY_KEY } from "@/lib/api";
+import { acquireAttendanceLocation, formatAccuracy, getAccuracyQuality, type LocationError } from "@/lib/geolocation";
 
 type LabGroup = {
   id: string;
@@ -107,42 +108,69 @@ function FacultyConsole() {
   const [savingStudentId, setSavingStudentId] = useState("");
   const [activeNonce, setActiveNonce] = useState<string>("");
   const [nonceExpires, setNonceExpires] = useState<string>("");
+  const [startingSession, setStartingSession] = useState(false);
+  const [sessionLocation, setSessionLocation] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
 
   const runStart = async () => {
     setErr("");
+    setStartingSession(true);
+    setSessionLocation(null);
+    
     try {
-      if ("geolocation" in navigator) {
-        navigator.geolocation.getCurrentPosition(
-          async (pos) => {
-            try {
-              const { session } = await api<{ session: any }>("/attendance/start", {
-                method: "POST",
-                body: {
-                  subjectOfferingId: subjectId,
-                  sessionType,
-                  ...(sessionType === "lab" ? { academicLabGroupId: labGroupId } : {}),
-                  latitude: pos.coords.latitude,
-                  longitude: pos.coords.longitude,
-                  radiusMeters: 50,
-                },
-              });
-              setActiveSession(session);
-              setActiveNonce(session.active_nonce);
-              setNonceExpires(session.nonce_expires);
-              void qc.invalidateQueries({ queryKey: ["attendance-sessions", subjectId] });
-            } catch (e: any) {
-              setErr(e.message);
-            }
-          },
-          () => {
-            setErr("Location required to start session.");
-          },
-        );
+      // Acquire fresh, accurate GPS location for faculty
+      const location = await acquireAttendanceLocation({
+        maxAccuracyMeters: 25, // Faculty should also have good accuracy
+        timeoutMs: 15000,
+        maxAttempts: 3,
+      });
+      
+      setSessionLocation({
+        lat: location.latitude,
+        lon: location.longitude,
+        accuracy: location.accuracy,
+      });
+      
+      const { session } = await api<{ session: any }>("/attendance/start", {
+        method: "POST",
+        body: {
+          subjectOfferingId: subjectId,
+          sessionType,
+          ...(sessionType === "lab" ? { academicLabGroupId: labGroupId } : {}),
+          latitude: location.latitude,
+          longitude: location.longitude,
+          radiusMeters: 50,
+        },
+      });
+      
+      setActiveSession(session);
+      setActiveNonce(session.active_nonce);
+      setNonceExpires(session.nonce_expires);
+      void qc.invalidateQueries({ queryKey: ["attendance-sessions", subjectId] });
+    } catch (error: any) {
+      // Handle location-specific errors
+      if (error.code) {
+        const locError = error as LocationError;
+        switch (locError.code) {
+          case 'PERMISSION_DENIED':
+            setErr('Location permission denied. Enable location in your browser settings.');
+            break;
+          case 'POSITION_UNAVAILABLE':
+            setErr('GPS unavailable. Ensure location services are enabled and you are in the classroom.');
+            break;
+          case 'TIMEOUT':
+            setErr('Location request timed out. Move to a location with better signal.');
+            break;
+          case 'ACCURACY_TOO_LOW':
+            setErr(`GPS accuracy too low: ${locError.reportedAccuracy ? Math.round(locError.reportedAccuracy) : '?'}m. Need 25m or better. Move to a window or open area.`);
+            break;
+          default:
+            setErr('Failed to get your location. Try again.');
+        }
       } else {
-        setErr("Location not supported");
+        setErr(error.message || 'Failed to start session');
       }
-    } catch (e: any) {
-      setErr(e.message);
+    } finally {
+      setStartingSession(false);
     }
   };
 
@@ -308,15 +336,35 @@ function FacultyConsole() {
             </>
           )}
           <button
-            disabled={!subjectId || (sessionType === "lab" && !labGroupId)}
+            disabled={!subjectId || (sessionType === "lab" && !labGroupId) || startingSession}
             onClick={runStart}
             className="press mt-5 w-full rounded-2xl bg-ai py-3.5 text-sm font-semibold text-primary-foreground shadow-float disabled:opacity-40"
           >
-            Open session & show code
+            {startingSession ? (
+              <span className="flex items-center justify-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Getting location...
+              </span>
+            ) : (
+              "Open session & show code"
+            )}
           </button>
+          {sessionLocation && (
+            <p className="mt-2 text-xs text-muted-foreground text-center">
+              Location acquired: {formatAccuracy(sessionLocation.accuracy)} accuracy ({getAccuracyQuality(sessionLocation.accuracy)})
+            </p>
+          )}
         </section>
       )}
-      {err && <p className="mt-3 text-xs text-destructive">{err}</p>}
+      {err && (
+        <div className="surface mt-3 flex items-start gap-2 rounded-2xl bg-destructive/10 p-4">
+          <AlertCircle className="h-5 w-5 shrink-0 text-destructive" />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-destructive">Error</p>
+            <p className="mt-1 text-xs text-destructive/80">{err}</p>
+          </div>
+        </div>
+      )}
 
       {!activeSession && subjectId && (
         <>

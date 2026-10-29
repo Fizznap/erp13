@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Radio, CheckCircle2, Clock, Presentation } from "lucide-react";
+import { Radio, CheckCircle2, Clock, Presentation, AlertCircle, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell, SectionTitle } from "@/components/snippet/AppShell";
 import { useMe } from "@/hooks/use-auth";
@@ -9,6 +9,7 @@ import { ManualRequest } from "@/components/snippet/ManualRequest";
 import { AttendancePlan } from "@/components/snippet/AttendancePlan";
 import { api } from "@/lib/api";
 import { parseAttendanceHistoryResponse, summarizeAttendanceHistory, uniqueAttendanceHistory } from "@/lib/attendance";
+import { acquireAttendanceLocation, formatAccuracy, getAccuracyQuality, type LocationError } from "@/lib/geolocation";
 
 export const Route = createFileRoute("/_authenticated/attendance")({
   head: () => ({
@@ -73,37 +74,73 @@ function Attendance() {
   const [err, setErr] = useState("");
   const [done, setDone] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [locationStatus, setLocationStatus] = useState<'idle' | 'acquiring' | 'acquired' | 'failed'>('idle');
+  const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setBusy(true); setErr("");
+    setBusy(true); 
+    setErr("");
+    setLocationStatus('acquiring');
+    setLocationAccuracy(null);
     
-    // We need latitude and longitude to submit
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(async (pos) => {
-        try {
-            const res = await api<{ status: string }>('/attendance/mark', {
-              method: 'POST',
-              body: { 
-                nonce: code, 
-                latitude: pos.coords.latitude, 
-                longitude: pos.coords.longitude 
-              }
-            });
-          setDone("Marked present");
-          setCode("");
-          qc.invalidateQueries({ queryKey: ["my-history"] });
-        } catch (error: any) {
-          setErr(error.message);
-        } finally {
-          setBusy(false);
-        }
-      }, (error) => {
-        setErr("Location access is required to mark attendance.");
-        setBusy(false);
+    try {
+      // Acquire fresh, accurate GPS location
+      const location = await acquireAttendanceLocation({
+        maxAccuracyMeters: 25, // Configurable - requires 25m or better
+        timeoutMs: 15000,
+        maxAttempts: 3,
       });
-    } else {
-      setErr("Geolocation not supported on this device.");
+      
+      setLocationStatus('acquired');
+      setLocationAccuracy(location.accuracy);
+      
+      // Submit attendance with location data
+      const res = await api<{ status: string; distance?: number; accuracy?: number }>('/attendance/mark', {
+        method: 'POST',
+        body: { 
+          nonce: code, 
+          latitude: location.latitude, 
+          longitude: location.longitude,
+          accuracy: location.accuracy,
+          timestamp: location.timestamp,
+        }
+      });
+      
+      setDone(`Marked present (${Math.round(res.distance || 0)}m away)`);
+      setCode("");
+      setLocationStatus('idle');
+      qc.invalidateQueries({ queryKey: ["my-history"] });
+    } catch (error: any) {
+      setLocationStatus('failed');
+      
+      // Handle location-specific errors with clear messages
+      if (error.code) {
+        const locError = error as LocationError;
+        switch (locError.code) {
+          case 'PERMISSION_DENIED':
+            setErr('Location permission denied. Enable location in your browser settings and try again.');
+            break;
+          case 'POSITION_UNAVAILABLE':
+            setErr('GPS unavailable. Ensure location services are enabled and you have clear sky visibility.');
+            break;
+          case 'TIMEOUT':
+            setErr('Location request timed out. Move to an open area and try again.');
+            break;
+          case 'ACCURACY_TOO_LOW':
+            setErr(locError.message);
+            break;
+          case 'NOT_SUPPORTED':
+            setErr('Geolocation is not supported by this device.');
+            break;
+          default:
+            setErr('Failed to get your location. Try again.');
+        }
+      } else {
+        // API error
+        setErr(error.message || 'Failed to mark attendance');
+      }
+    } finally {
       setBusy(false);
     }
   };
@@ -156,13 +193,42 @@ function Attendance() {
               onChange={(e) => { setCode(e.target.value.replace(/[^a-z0-9]/gi, "").slice(0, 6).toUpperCase()); setErr(""); }}
               placeholder="••••••"
               className={`mt-3 w-full rounded-2xl border bg-muted px-4 py-4 text-center font-mono text-2xl tracking-[0.5em] outline-hidden transition focus:border-primary focus:bg-card ${err ? "border-destructive" : "border-transparent"}`} />
-            {err && <p className="mt-2 text-xs text-destructive">{err}</p>}
             
-            {/* Needs Subject Selection if backend requires it. For now, assuming code uniquely identifies or subject selection comes later. */}
+            {/* Location status indicator */}
+            {locationStatus === 'acquiring' && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Acquiring GPS location... ({locationAccuracy ? `${Math.round(locationAccuracy)}m accuracy` : 'high accuracy mode'})</span>
+              </div>
+            )}
+            
+            {locationStatus === 'acquired' && locationAccuracy && (
+              <div className={`mt-3 flex items-center gap-2 text-xs ${getAccuracyQuality(locationAccuracy) === 'excellent' || getAccuracyQuality(locationAccuracy) === 'good' ? 'text-primary-deep' : 'text-muted-foreground'}`}>
+                <CheckCircle2 className="h-4 w-4" />
+                <span>Location acquired: {formatAccuracy(locationAccuracy)} accuracy ({getAccuracyQuality(locationAccuracy)})</span>
+              </div>
+            )}
+            
+            {err && (
+              <div className="mt-3 flex items-start gap-2 rounded-lg bg-destructive/10 p-3">
+                <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />
+                <p className="text-xs text-destructive">{err}</p>
+              </div>
+            )}
             
             <button disabled={code.length !== 6 || busy} className="press mt-4 w-full rounded-2xl bg-foreground py-3.5 text-sm font-semibold text-background disabled:opacity-40">
-              {busy ? "Marking…" : "Mark attendance"}
+              {busy ? (locationStatus === 'acquiring' ? 'Getting location...' : 'Marking attendance...') : 'Mark attendance'}
             </button>
+            
+            {locationStatus === 'failed' && !busy && (
+              <button 
+                type="button"
+                onClick={(e) => { setLocationStatus('idle'); setErr(''); }}
+                className="mt-2 w-full text-xs font-medium text-primary underline"
+              >
+                Try again
+              </button>
+            )}
           </form>
         )}
         {session && !marked && <ManualRequest sessionId={session.id} />}
