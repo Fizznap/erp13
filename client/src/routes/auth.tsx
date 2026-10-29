@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Spark } from "@/components/snippet/AppShell";
 import { SignInHelp } from "@/components/snippet/SignInHelp";
-import { api, setTokens, setOnboardingToken, getStoredUser, setStoredUser } from "@/lib/api";
+import { api, ApiError, setTokens, setOnboardingToken, getStoredUser, setStoredUser } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 
 const GOOGLE_CLIENT_ID = import.meta.env["VITE_GOOGLE_CLIENT_ID"] as string | undefined;
@@ -68,8 +68,23 @@ function AuthPage() {
   const [password, setPassword] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string; canResend?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [googleReady, setGoogleReady] = useState(false);
   const googleButton = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (cooldownSeconds <= 0) return;
+    const timer = setInterval(() => {
+      setCooldownSeconds((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldownSeconds]);
 
   const finishLogin = useCallback(
     (data: AuthResponse) => {
@@ -128,7 +143,16 @@ function AuthPage() {
         });
         finishLogin(data);
       } catch (err: unknown) {
-        setMsg({ ok: false, text: getErrorMessage(err, "Google sign-in failed") });
+        if (err instanceof ApiError && err.status === 429) {
+          const cooldown = err.retryAfter && err.retryAfter > 0 ? err.retryAfter : 60;
+          setCooldownSeconds(cooldown);
+          setMsg({
+            ok: false,
+            text: err.message || `Requests are temporarily limited. Please wait ${cooldown}s before trying again.`,
+          });
+        } else {
+          setMsg({ ok: false, text: getErrorMessage(err, "Google sign-in failed") });
+        }
       }
       setBusy(false);
     },
@@ -182,6 +206,7 @@ function AuthPage() {
       setMsg({ ok: false, text: mode === "up" ? "Only @ustu.edu.in college emails can register." : "Use your registered account email." });
       return;
     }
+    if (cooldownSeconds > 0) return;
     setBusy(true);
     try {
       if (mode === "up") {
@@ -198,14 +223,47 @@ function AuthPage() {
         finishLogin(data);
       }
     } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        if (err.status === 429) {
+          const cooldown = err.retryAfter && err.retryAfter > 0 ? err.retryAfter : 60;
+          setCooldownSeconds(cooldown);
+          setMsg({
+            ok: false,
+            text: err.message || `Requests are temporarily limited. Please wait ${cooldown}s before trying again.`,
+          });
+          return;
+        }
+        if (err.status === 401) {
+          setMsg({ ok: false, text: "Invalid email or password" });
+          return;
+        }
+        if (err.status === 403) {
+          const isUnverified = err.message.toLowerCase().includes("verify");
+          setMsg({
+            ok: false,
+            text: err.message,
+            canResend: isUnverified,
+          });
+          return;
+        }
+        if (err.status >= 500) {
+          setMsg({ ok: false, text: "Server error. Please try again later." });
+          return;
+        }
+      }
+      if (err instanceof TypeError && err.message.toLowerCase().includes("fetch")) {
+        setMsg({ ok: false, text: "Network error. Unable to reach the server." });
+        return;
+      }
       const message = getErrorMessage(err, "Authentication failed");
       setMsg({
         ok: false,
         text: message,
         canResend: message === "Verify your college email before signing in",
       });
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   };
 
   const resendVerification = async () => {
@@ -272,10 +330,17 @@ function AuthPage() {
             </p>
           )}
           <button
-            disabled={busy}
+            type="submit"
+            disabled={busy || cooldownSeconds > 0}
             className="press w-full rounded-2xl bg-foreground py-3.5 text-sm font-semibold text-background disabled:opacity-50"
           >
-            {busy ? "Please wait…" : mode === "in" ? "Sign in" : "Sign up"}
+            {busy
+              ? "Please wait…"
+              : cooldownSeconds > 0
+              ? `Cooldown active (${cooldownSeconds}s)`
+              : mode === "in"
+              ? "Sign in"
+              : "Sign up"}
           </button>
         </form>
 

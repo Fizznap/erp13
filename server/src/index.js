@@ -4,7 +4,14 @@ const cors = require('cors');
 const { apiLimiter } = require('./middleware/rateLimit');
 
 const app = express();
-app.set('trust proxy', true); // Trust reverse proxies (Cloudflare + Render)
+// Trust reverse proxy:
+// In production behind Render (or a single reverse proxy), trust 1 hop to safely
+// obtain the client IP from the proxy without blindly trusting arbitrary client-supplied headers.
+// Configurable via TRUST_PROXY env variable for custom infrastructure.
+const trustProxySetting = process.env.TRUST_PROXY !== undefined
+  ? (process.env.TRUST_PROXY === 'true' ? true : process.env.TRUST_PROXY === 'false' ? false : !isNaN(Number(process.env.TRUST_PROXY)) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY)
+  : 1;
+app.set('trust proxy', trustProxySetting);
 const PORT = process.env.PORT || 3001;
 
 // CORS — support multiple origins for Vercel production + preview URLs
@@ -32,7 +39,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.get('/api/health/db', apiLimiter, async (req, res) => {
+app.get('/api/health/db', async (req, res) => {
   try {
     const { pool } = require('./db/pool');
     const tables = await pool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'");
@@ -50,14 +57,19 @@ app.get('/api/health/db', apiLimiter, async (req, res) => {
   }
 });
 
-app.use('/api', apiLimiter);
-
 // Uploaded files are private; resource downloads use the authorization-checked
 // /api/resources/:id/download route. Keep direct filesystem access admin-only.
 app.use('/uploads', require('./routes/uploads'));
 
-// Routes
+// Authentication endpoints: Protected by dedicated loginLimiter, authLimiter, and refreshLimiter.
+// Mounted BEFORE the general apiLimiter so general API requests (resources, subjects, attendance)
+// from other users sharing a campus/NAT IP address never lock out legitimate logins!
 app.use('/api/auth', require('./routes/auth'));
+
+// General API rate limiter for data endpoints
+app.use('/api', apiLimiter);
+
+// Other API routes
 app.use('/api/academic', require('./routes/academic'));
 app.use('/api/subjects', require('./routes/subjects'));
 app.use('/api/resources', require('./routes/resources'));

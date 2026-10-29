@@ -96,6 +96,20 @@ async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
+export class ApiError extends Error {
+  status: number;
+  retryAfter?: number;
+  code?: string;
+
+  constructor(message: string, status: number, retryAfter?: number, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.retryAfter = retryAfter;
+    this.code = code;
+  }
+}
+
 export async function api<T = unknown>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const { method = "GET", body, headers = {} } = options;
 
@@ -123,8 +137,8 @@ export async function api<T = unknown>(endpoint: string, options: RequestOptions
 
   let res = await fetch(`${API_BASE}${endpoint}`, config);
 
-  // If 401, try to refresh token
-  if (res.status === 401 && token) {
+  // If 401, try to refresh token (do not refresh for auth endpoints themselves)
+  if (res.status === 401 && token && !endpoint.startsWith("/auth/")) {
     const newToken = await refreshAccessToken();
     if (newToken) {
       requestHeaders["Authorization"] = `Bearer ${newToken}`;
@@ -132,13 +146,22 @@ export async function api<T = unknown>(endpoint: string, options: RequestOptions
       res = await fetch(`${API_BASE}${endpoint}`, config);
     } else {
       clearTokens();
-      throw new Error("Session expired");
+      throw new ApiError("Session expired", 401);
     }
   }
 
   if (!res.ok) {
+    const retryAfterHeader = res.headers.get("retry-after") || res.headers.get("Retry-After");
+    let retryAfter: number | undefined;
+    if (retryAfterHeader) {
+      const parsed = parseInt(retryAfterHeader, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        retryAfter = parsed;
+      }
+    }
     const errorData = await res.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(errorData.error || `HTTP ${res.status}`);
+    const errorMessage = errorData.error || `HTTP ${res.status}`;
+    throw new ApiError(errorMessage, res.status, retryAfter, errorData.code);
   }
 
   return res.json();

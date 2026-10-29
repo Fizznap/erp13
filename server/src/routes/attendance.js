@@ -47,8 +47,8 @@ function isValidLocation(latitude, longitude) {
     latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
 }
 
-// POST /api/attendance/start — faculty starts attendance session
-router.post('/start', authenticate, authorize('faculty'), async (req, res) => {
+// POST /api/attendance/start — faculty or admin starts attendance session
+router.post('/start', authenticate, authorize('faculty', 'admin'), async (req, res) => {
   try {
     const { subjectOfferingId, subjectId, latitude, longitude, radiusMeters } = req.body;
     const sessionType = req.body.sessionType === 'lab' ? 'lab' : 'lecture';
@@ -68,28 +68,42 @@ router.post('/start', authenticate, authorize('faculty'), async (req, res) => {
     let actualSubjectId = subjectId;
     let actualOfferingId = subjectOfferingId || null;
     let offeringClass;
+    let sessionFacultyId = req.user.id;
 
     if (subjectOfferingId) {
-      const offering = await pool.query(
-        `SELECT so.subject_id, ac.branch_id, ac.batch_id, ac.division_id
-         FROM subject_offerings so
-         JOIN academic_classes ac ON ac.id = so.academic_class_id
-         WHERE so.id = $1 AND so.faculty_id = $2`,
-        [subjectOfferingId, req.user.id]
-      );
+      const offeringQuery = req.user.role === 'admin'
+        ? `SELECT so.subject_id, so.faculty_id, ac.branch_id, ac.batch_id, ac.division_id
+           FROM subject_offerings so
+           JOIN academic_classes ac ON ac.id = so.academic_class_id
+           WHERE so.id = $1`
+        : `SELECT so.subject_id, so.faculty_id, ac.branch_id, ac.batch_id, ac.division_id
+           FROM subject_offerings so
+           JOIN academic_classes ac ON ac.id = so.academic_class_id
+           WHERE so.id = $1 AND so.faculty_id = $2`;
+      const offeringParams = req.user.role === 'admin'
+        ? [subjectOfferingId]
+        : [subjectOfferingId, req.user.id];
+      const offering = await pool.query(offeringQuery, offeringParams);
       if (offering.rows.length === 0) {
-        return res.status(403).json({ error: 'You do not own this subject offering' });
+        return res.status(req.user.role === 'admin' ? 404 : 403).json({
+          error: req.user.role === 'admin' ? 'Subject offering not found' : 'You do not own this subject offering',
+        });
       }
       actualSubjectId = offering.rows[0].subject_id;
       offeringClass = offering.rows[0];
+      sessionFacultyId = offering.rows[0].faculty_id || req.user.id;
     } else {
-      const subject = await pool.query(
-        'SELECT id FROM subjects WHERE id = $1 AND faculty_id = $2',
-        [subjectId, req.user.id]
-      );
+      const subjectQuery = req.user.role === 'admin'
+        ? 'SELECT id, faculty_id FROM subjects WHERE id = $1'
+        : 'SELECT id, faculty_id FROM subjects WHERE id = $1 AND faculty_id = $2';
+      const subjectParams = req.user.role === 'admin' ? [subjectId] : [subjectId, req.user.id];
+      const subject = await pool.query(subjectQuery, subjectParams);
       if (subject.rows.length === 0) {
-        return res.status(403).json({ error: 'You do not own this subject' });
+        return res.status(req.user.role === 'admin' ? 404 : 403).json({
+          error: req.user.role === 'admin' ? 'Subject not found' : 'You do not own this subject',
+        });
       }
+      sessionFacultyId = subject.rows[0].faculty_id || req.user.id;
     }
 
     if (sessionType === 'lab') {
@@ -110,14 +124,14 @@ router.post('/start', authenticate, authorize('faculty'), async (req, res) => {
     if (actualOfferingId) {
       await pool.query(
         `UPDATE attendance_sessions SET is_active = false, ended_at = now()
-         WHERE subject_offering_id = $1 AND faculty_id = $2 AND is_active = true`,
-        [actualOfferingId, req.user.id]
+         WHERE subject_offering_id = $1 AND ($2 = 'admin' OR faculty_id = $3) AND is_active = true`,
+        [actualOfferingId, req.user.role, req.user.id]
       );
     } else {
       await pool.query(
         `UPDATE attendance_sessions SET is_active = false, ended_at = now()
-         WHERE subject_id = $1 AND faculty_id = $2 AND is_active = true`,
-        [actualSubjectId, req.user.id]
+         WHERE subject_id = $1 AND ($2 = 'admin' OR faculty_id = $3) AND is_active = true`,
+        [actualSubjectId, req.user.role, req.user.id]
       );
     }
 
@@ -127,7 +141,7 @@ router.post('/start', authenticate, authorize('faculty'), async (req, res) => {
     const result = await pool.query(
       `INSERT INTO attendance_sessions (subject_id, subject_offering_id, academic_lab_group_id, faculty_id, latitude, longitude, radius_meters, active_nonce, nonce_expires)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [actualSubjectId, actualOfferingId, academicLabGroupId, req.user.id, latitude, longitude, radius, nonce, nonceExpires]
+      [actualSubjectId, actualOfferingId, academicLabGroupId, sessionFacultyId, latitude, longitude, radius, nonce, nonceExpires]
     );
 
     res.status(201).json({ session: result.rows[0] });
@@ -138,11 +152,11 @@ router.post('/start', authenticate, authorize('faculty'), async (req, res) => {
 });
 
 // GET /api/attendance/:sessionId/nonce — get current nonce (auto-rotate if expired)
-router.get('/:sessionId/nonce', authenticate, authorize('faculty'), async (req, res) => {
+router.get('/:sessionId/nonce', authenticate, authorize('faculty', 'admin'), async (req, res) => {
   try {
     const session = await pool.query(
-      'SELECT * FROM attendance_sessions WHERE id = $1 AND faculty_id = $2',
-      [req.params.sessionId, req.user.id]
+      'SELECT * FROM attendance_sessions WHERE id = $1 AND ($2 = \'admin\' OR faculty_id = $3)',
+      [req.params.sessionId, req.user.role, req.user.id]
     );
     if (session.rows.length === 0) {
       return res.status(404).json({ error: 'Session not found' });
@@ -325,13 +339,13 @@ router.post('/mark', authenticate, authorize('student'), async (req, res) => {
 });
 
 // POST /api/attendance/:sessionId/end — end attendance session
-router.post('/:sessionId/end', authenticate, authorize('faculty'), async (req, res) => {
+router.post('/:sessionId/end', authenticate, authorize('faculty', 'admin'), async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE attendance_sessions SET is_active = false, ended_at = now()
-       WHERE id = $1 AND faculty_id = $2 AND is_active = true
+       WHERE id = $1 AND ($2 = 'admin' OR faculty_id = $3) AND is_active = true
        RETURNING *`,
-      [req.params.sessionId, req.user.id]
+      [req.params.sessionId, req.user.role, req.user.id]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Active session not found' });

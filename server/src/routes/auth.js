@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const { pool } = require('../db/pool');
 const { authenticate, authenticateForProfile, authenticateOnboarding, isProfileComplete } = require('../middleware/auth');
-const { authLimiter } = require('../middleware/rateLimit');
+const { authLimiter, loginLimiter, refreshLimiter } = require('../middleware/rateLimit');
 const { isCollegeEmail, normalizeEmail } = require('../utils/collegeEmail');
 const { parseStudentRollNumber, canonicalBranchCode } = require('../utils/studentRollNumber');
 const { verifyGoogleIdToken, GoogleIdentityConfigurationError } = require('../services/googleIdentity');
@@ -339,7 +339,7 @@ router.post('/reset-password', authLimiter, async (req, res) => {
 
 
 // POST /api/auth/login
-router.post('/login', authLimiter, async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { email: rawEmail, password } = req.body;
     const email = normalizeEmail(rawEmail);
@@ -378,7 +378,7 @@ router.post('/login', authLimiter, async (req, res) => {
 });
 
 // POST /api/auth/google — verify Google's signed ID token before issuing Snippet tokens.
-router.post('/google', authLimiter, async (req, res) => {
+router.post('/google', loginLimiter, async (req, res) => {
   try {
     const { credential } = req.body;
     if (typeof credential !== 'string' || credential.length === 0 || credential.length > 10000) {
@@ -458,7 +458,7 @@ router.post('/google', authLimiter, async (req, res) => {
 });
 
 // POST /api/auth/refresh
-router.post('/refresh', authLimiter, async (req, res) => {
+router.post('/refresh', refreshLimiter, async (req, res) => {
   try {
     const { refreshToken } = req.body;
     if (!refreshToken) {

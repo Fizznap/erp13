@@ -4,6 +4,7 @@ import { ArrowLeft, Check, X } from "lucide-react";
 import { AppShell, SectionTitle } from "@/components/snippet/AppShell";
 import { useMe } from "@/hooks/use-auth";
 import { AcademicAdmin } from "@/components/snippet/AcademicAdmin";
+import { AdminAttendance } from "@/components/snippet/AdminAttendance";
 import { api } from "@/lib/api";
 
 export const Route = createFileRoute("/_authenticated/admin")({
@@ -68,6 +69,7 @@ function Admin() {
               </div>
             ))}
           </div>
+          <AdminAttendance />
           <AcademicAdmin />
         </>
       )}

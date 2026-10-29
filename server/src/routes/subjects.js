@@ -70,7 +70,9 @@ router.get('/', authenticate, async (req, res) => {
     } else {
       // Admin sees every subject, including newly created subjects without an offering.
       result = await pool.query(
-        `SELECT s.*, so.id AS offering_id, u.full_name AS faculty_name,
+        `SELECT s.*, so.id AS offering_id, so.academic_class_id,
+                ac.branch_id, ac.batch_id, ac.division_id,
+                u.full_name AS faculty_name,
                 br.name AS branch_name, br.code AS branch_code,
                 d.name AS division_name, ba.start_year AS batch_start_year,
                 ba.end_year AS batch_end_year, sem.number AS semester_number,
