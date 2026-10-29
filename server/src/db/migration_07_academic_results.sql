@@ -114,6 +114,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_update_result_grade ON academic_results;
 CREATE TRIGGER trigger_update_result_grade
     BEFORE INSERT OR UPDATE ON academic_results
     FOR EACH ROW

@@ -44,6 +44,20 @@ async function initDatabase() {
     await pool.query(embeddingMetadataMigration);
     console.log('Embedding provider metadata schema is up to date.');
 
+    const academicResultsMigration = fs.readFileSync(
+      path.join(__dirname, 'migration_07_academic_results.sql'),
+      'utf-8'
+    );
+    await pool.query(academicResultsMigration);
+    console.log('Academic results schema is up to date.');
+
+    const attendanceCorrectionsMigration = fs.readFileSync(
+      path.join(__dirname, 'migration_08_attendance_corrections.sql'),
+      'utf-8'
+    );
+    await pool.query(attendanceCorrectionsMigration);
+    console.log('Attendance corrections audit schema is up to date.');
+
     // Add subject_offering_id and new tracking columns to resources
     await pool.query(`
       ALTER TABLE resources ADD COLUMN IF NOT EXISTS subject_offering_id UUID REFERENCES subject_offerings(id) ON DELETE CASCADE;
