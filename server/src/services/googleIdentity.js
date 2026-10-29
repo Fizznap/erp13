@@ -3,9 +3,11 @@ const { COLLEGE_DOMAIN, isCollegeEmail, normalizeEmail } = require('../utils/col
 
 class GoogleIdentityConfigurationError extends Error {}
 
+const configuredAdminEmail = () => process.env.ADMIN_EMAIL?.trim().toLowerCase() || 'smit2shinde2@gmail.com';
+
 async function verifyGoogleIdToken(idToken) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
-  if (!clientId) {
+  if (!clientId || clientId === 'your-google-oauth-client-id.apps.googleusercontent.com') {
     throw new GoogleIdentityConfigurationError('Google sign-in is not configured');
   }
 
@@ -27,13 +29,18 @@ async function verifyGoogleIdToken(idToken) {
   }
 
   const email = normalizeEmail(payload.email);
-  if (!email || !isCollegeEmail(email)) {
-    throw new Error('A verified @ustu.edu.in account is required');
-  }
+  const adminEmail = configuredAdminEmail();
+  const isAdmin = email && email === adminEmail;
 
-  // Snippet uses the institution's managed Google Workspace domain.
-  if (typeof payload.hd !== 'string' || payload.hd.toLowerCase() !== COLLEGE_DOMAIN) {
-    throw new Error('A managed ustu.edu.in Google account is required');
+  if (!isAdmin) {
+    if (!email || !isCollegeEmail(email)) {
+      throw new Error('A verified @ustu.edu.in account is required');
+    }
+
+    // Snippet uses the institution's managed Google Workspace domain.
+    if (typeof payload.hd !== 'string' || payload.hd.toLowerCase() !== COLLEGE_DOMAIN) {
+      throw new Error('A managed ustu.edu.in Google account is required');
+    }
   }
 
   let picture = null;
@@ -58,4 +65,4 @@ async function verifyGoogleIdToken(idToken) {
   };
 }
 
-module.exports = { verifyGoogleIdToken, GoogleIdentityConfigurationError };
+module.exports = { verifyGoogleIdToken, GoogleIdentityConfigurationError, configuredAdminEmail };

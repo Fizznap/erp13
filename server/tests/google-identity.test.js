@@ -67,4 +67,35 @@ describe('Google ID token validation', () => {
     await expect(verifyGoogleIdToken('google-id-token')).rejects.toThrow('Google sign-in is not configured');
     expect(OAuth2Client).not.toHaveBeenCalled();
   });
+
+  test('fails closed if the server has placeholder Google client ID configured', async () => {
+    process.env.GOOGLE_CLIENT_ID = 'your-google-oauth-client-id.apps.googleusercontent.com';
+
+    await expect(verifyGoogleIdToken('google-id-token')).rejects.toThrow('Google sign-in is not configured');
+    expect(OAuth2Client).not.toHaveBeenCalled();
+  });
+
+  test('allows configured administrator Google sign-in without college domain restriction', async () => {
+    process.env.ADMIN_EMAIL = 'smit2shinde2@gmail.com';
+    client.verifyIdToken.mockResolvedValue({
+      getPayload: () => ({
+        iss: 'https://accounts.google.com',
+        aud: process.env.GOOGLE_CLIENT_ID,
+        exp: Math.floor(Date.now() / 1000) + 300,
+        sub: 'admin-google-subject',
+        email: '  smit2shinde2@gmail.com ',
+        email_verified: true,
+        name: 'Smit Shinde',
+      }),
+    });
+
+    const identity = await verifyGoogleIdToken('google-id-token');
+
+    expect(identity).toEqual({
+      email: 'smit2shinde2@gmail.com',
+      fullName: 'Smit Shinde',
+      subject: 'admin-google-subject',
+      picture: null,
+    });
+  });
 });

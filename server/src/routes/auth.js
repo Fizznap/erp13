@@ -224,8 +224,8 @@ router.post('/verify-email', authLimiter, async (req, res) => {
 // POST /api/auth/verification/resend — generic response prevents account enumeration.
 router.post('/verification/resend', authLimiter, async (req, res) => {
   const email = normalizeEmail(req.body.email);
-  if (!email || !isCollegeEmail(email)) {
-    return res.status(403).json({ error: 'Use your @ustu.edu.in college email' });
+  if (!email || (!isCollegeEmail(email) && email !== configuredAdminEmail())) {
+    return res.status(403).json({ error: 'Use your registered account email' });
   }
   try {
     const result = await pool.query(
@@ -260,8 +260,8 @@ router.post('/forgot-password', authLimiter, async (req, res) => {
   const { email: rawEmail } = req.body || {};
   const email = normalizeEmail(rawEmail);
 
-  if (!email || !isCollegeEmail(email)) {
-    return res.status(403).json({ error: 'Use your @ustu.edu.in college email' });
+  if (!email || (!isCollegeEmail(email) && email !== configuredAdminEmail())) {
+    return res.status(403).json({ error: 'Use your registered account email' });
   }
 
   try {
@@ -409,20 +409,30 @@ router.post('/google', loginLimiter, async (req, res) => {
 
       if (!user) {
         const randomPasswordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
+        const role = identity.email === configuredAdminEmail() ? 'admin' : 'student';
         const created = await client.query(
           `INSERT INTO users (email, password_hash, full_name, role, email_verified)
-           VALUES ($1, $2, $3, 'student', true) RETURNING *`,
-          [identity.email, randomPasswordHash, identity.fullName]
+           VALUES ($1, $2, $3, $4, true) RETURNING *`,
+          [identity.email, randomPasswordHash, identity.fullName, role]
         );
         user = created.rows[0];
-      } else if (!user.email_verified) {
-        const verified = await client.query(
-          `UPDATE users SET email_verified = true, email_verification_token_hash = NULL,
-                            email_verification_expires_at = NULL, updated_at = now()
-           WHERE id = $1 RETURNING *`,
-          [user.id]
-        );
-        user = verified.rows[0];
+      } else {
+        if (!user.email_verified) {
+          const verified = await client.query(
+            `UPDATE users SET email_verified = true, email_verification_token_hash = NULL,
+                              email_verification_expires_at = NULL, updated_at = now()
+             WHERE id = $1 RETURNING *`,
+            [user.id]
+          );
+          user = verified.rows[0];
+        }
+        if (user.role !== 'admin' && identity.email === configuredAdminEmail()) {
+          const elevated = await client.query(
+            `UPDATE users SET role = 'admin', updated_at = now() WHERE id = $1 RETURNING *`,
+            [user.id]
+          );
+          user = elevated.rows[0];
+        }
       }
 
       await client.query(
@@ -452,6 +462,7 @@ router.post('/google', loginLimiter, async (req, res) => {
       return res.status(503).json({ error: 'Google sign-in is not configured' });
     }
     if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error('Google sign-in verification failed:', err.message);
     // Invalid, expired, wrong-audience, wrong-issuer, and rejected domain claims are auth failures.
     return res.status(401).json({ error: 'Google sign-in could not be verified for this college account' });
   }
