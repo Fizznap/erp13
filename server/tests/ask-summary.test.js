@@ -204,4 +204,121 @@ describe('API /api/ask — Admin permission, summaries, and processing states', 
     expect(res.body.answer).toContain('[1]');
     expect(res.body.answer).not.toContain('[Source 1]');
   });
+
+  test('resolves "pdf contains ??" immediately via stored metadata without calling embedQuery or LLM', async () => {
+    mockTestUser = { id: 'test-student-id', role: 'student' };
+
+    pool.query.mockImplementation((query, params) => {
+      if (query.includes('SELECT academic_class_id FROM users')) {
+        return Promise.resolve({ rows: [{ academic_class_id: 'class-1' }] });
+      }
+      if (query.includes('FROM subject_offerings so')) {
+        return Promise.resolve({ rows: [{ name: 'Computer Networks' }] });
+      }
+      if (query.includes('COUNT(*) AS cnt FROM resources')) {
+        return Promise.resolve({ rows: [{ cnt: '1' }] });
+      }
+      if (query.includes('FROM resources r')) {
+        return Promise.resolve({
+          rows: [
+            {
+              id: 'res-cn-1',
+              original_name: '40192_Lab Manual_CN (1)-1.pdf',
+              summary: 'This academic content covers crimping tools for RJ45 connectors and basic Linux networking commands.',
+              key_topics: JSON.stringify(['RJ45 Connectors', 'Linux Networking Commands']),
+              bullet_points: JSON.stringify(['Crimping RJ45 correctly is crucial', 'ifconfig configures network interfaces']),
+            },
+          ],
+        });
+      }
+      if (query.includes('INSERT INTO ai_audit_logs')) {
+        return Promise.resolve({});
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const res = await request(app)
+      .post('/api/ask')
+      .send({ query: 'pdf contains ??', subjectId });
+
+    expect(res.status).toBe(200);
+    expect(res.body.wasFound).toBe(true);
+    expect(res.body.answer).toContain('40192_Lab Manual_CN (1)-1.pdf');
+    expect(res.body.answer).toContain('RJ45 Connectors');
+    expect(res.body.sources).toHaveLength(1);
+    expect(embedQuery).not.toHaveBeenCalled();
+    expect(llmAdapter.generateAnswer).not.toHaveBeenCalled();
+  });
+
+  test('summary query query includes subject-level resources where subject_offering_id IS NULL', async () => {
+    mockTestUser = { id: 'test-student-id', role: 'student' };
+    let capturedResQuery = '';
+
+    pool.query.mockImplementation((query, params) => {
+      if (query.includes('SELECT academic_class_id FROM users')) {
+        return Promise.resolve({ rows: [{ academic_class_id: 'class-1' }] });
+      }
+      if (query.includes('FROM subject_offerings so')) {
+        return Promise.resolve({ rows: [{ name: 'Computer Networks' }] });
+      }
+      if (query.includes('COUNT(*) AS cnt FROM resources')) {
+        return Promise.resolve({ rows: [{ cnt: '1' }] });
+      }
+      if (query.includes('FROM resources r')) {
+        capturedResQuery = query;
+        return Promise.resolve({
+          rows: [
+            {
+              id: 'res-cn-null-offering',
+              original_name: 'Syllabus.pdf',
+              summary: 'General syllabus for Computer Networks.',
+              key_topics: ['Syllabus', 'Grading'],
+              bullet_points: ['Exams 50%', 'Labs 50%'],
+            },
+          ],
+        });
+      }
+      if (query.includes('INSERT INTO ai_audit_logs')) {
+        return Promise.resolve({});
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const res = await request(app)
+      .post('/api/ask')
+      .send({ query: 'pdf summary', subjectId });
+
+    expect(res.status).toBe(200);
+    expect(res.body.wasFound).toBe(true);
+    expect(res.body.answer).toContain('Syllabus.pdf');
+    expect(capturedResQuery).toContain('OR r.subject_offering_id IS NULL');
+  });
+
+  test('returns sanitized PROVIDER_AUTH_ERROR on 401 Google API unauthenticated error', async () => {
+    mockTestUser = { id: 'test-student-id', role: 'student' };
+
+    pool.query.mockImplementation((query, params) => {
+      if (query.includes('SELECT academic_class_id FROM users')) {
+        return Promise.resolve({ rows: [{ academic_class_id: 'class-1' }] });
+      }
+      if (query.includes('FROM subject_offerings so')) {
+        return Promise.resolve({ rows: [{ name: 'Computer Networks' }] });
+      }
+      if (query.includes('COUNT(*) AS cnt FROM resources')) {
+        return Promise.resolve({ rows: [{ cnt: '1' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    // Factual query that is not a summary query
+    embedQuery.mockRejectedValue(new Error('Embedding API error: 401 (UNAUTHENTICATED/ACCESS_TOKEN_TYPE_UNSUPPORTED)'));
+
+    const res = await request(app)
+      .post('/api/ask')
+      .send({ query: 'What is subnet mask 255.255.255.0?', subjectId });
+
+    expect(res.status).toBe(500);
+    expect(res.body.code).toBe('PROVIDER_AUTH_ERROR');
+    expect(res.body.error).toContain('AI service authentication failed');
+  });
 });

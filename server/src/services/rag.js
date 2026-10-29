@@ -127,10 +127,10 @@ async function vectorSearch(queryEmbedding, subjectId, userScope, topK = 5, opti
   let params = [vectorStr, subjectId, topK];
 
   if (userScope.role === 'student') {
-    authFilter = `AND r.subject_offering_id IN (SELECT id FROM subject_offerings WHERE academic_class_id = $4)`;
+    authFilter = `AND (r.subject_offering_id IN (SELECT id FROM subject_offerings WHERE academic_class_id = $4) OR r.subject_offering_id IS NULL)`;
     params.push(userScope.academicClassId);
   } else if (userScope.role === 'faculty') {
-    authFilter = `AND r.subject_offering_id IN (SELECT id FROM subject_offerings WHERE faculty_id = $4)`;
+    authFilter = `AND (r.subject_offering_id IN (SELECT id FROM subject_offerings WHERE faculty_id = $4) OR r.subject_offering_id IS NULL)`;
     params.push(userScope.facultyId);
   }
 
@@ -311,6 +311,8 @@ function getActiveGenerationProvider() {
   return getGenerationProvider();
 }
 
+const DOC_WORDS = '(?:pdf|document|doc|file|notes|manual|syllabus|book|materials?|course\\s+materials?)';
+
 /**
  * Detects whether a query is asking for a general document summary or overview,
  * rather than a narrow factual retrieval question.
@@ -318,16 +320,41 @@ function getActiveGenerationProvider() {
 function isSummaryQuery(query) {
   if (!query || typeof query !== 'string') return false;
   const q = query.trim().toLowerCase();
-  return (
-    /\bwhat\s+(this|the)\s+(pdf|document|file|notes|manual|syllabus|book|material)\s+consists?\b/i.test(q) ||
-    /\bwhat\s+(this|the)\s+(pdf|document|file|notes|manual|syllabus|book|material)\s+consists?\s+of\b/i.test(q) ||
-    /\bwhat\s+(does\s+)?(this|the)\s+(pdf|document|file|notes|manual|syllabus|book|material)\s+(contain|consist|cover|have|include|say)\b/i.test(q) ||
-    /\bwhat\s+is\s+(this|the)\s+(pdf|document|file|notes|manual|syllabus|book|material)\s+about\b/i.test(q) ||
-    /\bwhat('?s|\s+is)\s+in\s+(this|the)\s+(pdf|document|file|notes|manual|material)\b/i.test(q) ||
-    /\b(summarize|summary\s+of)\s+(this|the|all)?\s*(pdf|document|file|notes|manual|materials?)\b/i.test(q) ||
-    /\bwhat\s+topics\s+(are\s+)?covered\b/i.test(q) ||
-    /\boverview\s+of\s+(this|the)\s+(pdf|document|file|notes|manual|material)\b/i.test(q)
-  );
+
+  // 1. Direct patterns like "pdf contains ??", "pdf summary", "pdf overview", "document contents", "notes highlights"
+  if (new RegExp(`^\\s*${DOC_WORDS}s?\\s+(?:contains?|consists?(?:\\s+of)?|covers?|summary|overview|contents?|highlights?)\\b`, 'i').test(q)) {
+    return true;
+  }
+  // 2. "what [does] [this|the] <doc> (contain|consist|cover|have|include|say)s?"
+  if (new RegExp(`\\b(?:what\\s+)?(?:does\\s+)?(?:this|the|our)?\\s*${DOC_WORDS}s?\\s+(?:contains?|consists?(?:\\s+of)?|covers?|includes?|says?|have)\\b`, 'i').test(q)) {
+    return true;
+  }
+  // 3. "what is [this|the] <doc> about" or "tell me about this <doc>"
+  if (new RegExp(`\\b(?:what\\s+is|what's|tell\\s+me\\s+about)\\s+(?:this|the)?\\s*${DOC_WORDS}s?\\s*(?:about)?\\b`, 'i').test(q)) {
+    return true;
+  }
+  // 4. "what's in [this|the] <doc>" or "what is inside [this|the] <doc>"
+  if (new RegExp(`\\bwhat(?:'s|\\s+is)?\\s+(?:in|inside)\\s+(?:this|the)?\\s*${DOC_WORDS}s?\\b`, 'i').test(q)) {
+    return true;
+  }
+  // 5. "summarize / summary / overview / contents of [this|the] <doc>"
+  if (new RegExp(`\\b(?:summarize|summary|overview|contents?|highlights?)\\s+(?:of\\s+)?(?:this|the|all)?\\s*${DOC_WORDS}s?\\b`, 'i').test(q)) {
+    return true;
+  }
+  // 6. "give me a summary [of this pdf]" or "give me an overview"
+  if (new RegExp(`\\bgive\\s+(?:me\\s+)?(?:a|an)?\\s*(?:summary|overview|brief)(?:\\s+(?:of\\s+)?(?:this|the)?\\s*${DOC_WORDS}s?)?\\b`, 'i').test(q)) {
+    return true;
+  }
+  // 7. "what topics are covered" or "topics covered in this <doc>"
+  if (new RegExp(`\\b(?:what\\s+)?topics\\s+(?:are\\s+)?covered\\b`, 'i').test(q)) {
+    return true;
+  }
+  // 8. General standalone "summarize", "summary", "overview"
+  if (/^(summarize|summary|overview|table of contents)\??$/i.test(q)) {
+    return true;
+  }
+
+  return false;
 }
 
 module.exports = {

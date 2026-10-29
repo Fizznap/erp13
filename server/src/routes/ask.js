@@ -108,10 +108,10 @@ router.post('/', authenticate, authorize('student', 'faculty', 'admin'), ragLimi
                       WHERE r.subject_id = $1 AND r.status = 'ready'`;
       const resParams = [subjectId];
       if (userScope.role === 'student') {
-        resQuery += ` AND r.subject_offering_id IN (SELECT id FROM subject_offerings WHERE academic_class_id = $2)`;
+        resQuery += ` AND (r.subject_offering_id IN (SELECT id FROM subject_offerings WHERE academic_class_id = $2) OR r.subject_offering_id IS NULL)`;
         resParams.push(userScope.academicClassId);
       } else if (userScope.role === 'faculty') {
-        resQuery += ` AND r.subject_offering_id IN (SELECT id FROM subject_offerings WHERE faculty_id = $2)`;
+        resQuery += ` AND (r.subject_offering_id IN (SELECT id FROM subject_offerings WHERE faculty_id = $2) OR r.subject_offering_id IS NULL)`;
         resParams.push(userScope.facultyId);
       }
       resQuery += ` ORDER BY r.created_at ASC`;
@@ -353,7 +353,25 @@ router.post('/', authenticate, authorize('student', 'faculty', 'admin'), ragLimi
     });
   } catch (err) {
     console.error('Ask error:', err);
-    res.status(500).json({ error: 'Failed to process query' });
+    const msg = String(err?.message || '');
+    let errorMessage = 'Failed to process query';
+    let code = 'INTERNAL_ERROR';
+
+    if (/401|unauthenticated|access_token|api[_\s-]?key/i.test(msg)) {
+      errorMessage = 'AI service authentication failed. Please verify the Gemini API key in server configuration.';
+      code = 'PROVIDER_AUTH_ERROR';
+    } else if (/429|resource_exhausted|quota/i.test(msg)) {
+      errorMessage = 'AI provider rate limit reached. Please retry in a moment.';
+      code = 'RATE_LIMIT_EXCEEDED';
+    } else if (/timeout|timed out|econnrefused|enotfound|fetch failed/i.test(msg)) {
+      errorMessage = 'Failed to process query';
+      code = 'PROVIDER_UNREACHABLE';
+    } else if ((err?.code && /^(42|08|28|53|XX)/.test(err.code)) || /pgvector|relation|syntax error/i.test(msg)) {
+      errorMessage = 'Database error occurred while retrieving course materials. Please try again.';
+      code = 'DATABASE_ERROR';
+    }
+
+    res.status(500).json({ error: errorMessage, code });
   }
 });
 
