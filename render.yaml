@@ -79,7 +79,7 @@ services:
       - key: MAX_FILE_SIZE
         value: "20971520"
       - key: SIMILARITY_THRESHOLD
-        value: "0.55"
+        value: "0.35"
       - key: TOP_K_CHUNKS
         value: "5"
       - key: CHUNK_SIZE_TOKENS
@@ -87,6 +87,10 @@ services:
       - key: CHUNK_OVERLAP_TOKENS
         value: "50"
       - key: GOOGLE_AI_MODEL
-        value: gemini-3.5-flash
+        value: gemini-3.1-flash-lite
+      - key: GOOGLE_AI_EMBEDDING_MODEL
+        value: gemini-embedding-2
+      - key: EMBEDDING_PROVIDER
+        value: gemini
       - key: GOOGLE_AI_MAX_OUTPUT_TOKENS
         value: "800"
