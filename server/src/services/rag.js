@@ -2,7 +2,10 @@ const { pool } = require('../db/pool');
 const { getEmbeddingProvider, getGenerationProvider, resolveEmbeddingProviderName, resolveGenerationProviderName } = require('./providers');
 require('dotenv').config();
 
-const GOOGLE_AI_API_KEY = () => process.env.GOOGLE_AI_API_KEY;
+const GOOGLE_AI_API_KEY = () => {
+  const key = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
+  return key && String(key).trim() ? String(key).trim() : undefined;
+};
 const EMBEDDING_MODEL = () => process.env.GOOGLE_AI_EMBEDDING_MODEL || 'gemini-embedding-2';
 const GENERATION_MODEL = () => process.env.GOOGLE_AI_MODEL || 'gemini-3.1-flash-lite';
 const GOOGLE_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
@@ -131,16 +134,17 @@ async function vectorSearch(queryEmbedding, subjectId, userScope, topK = 5, opti
     params.push(userScope.facultyId);
   }
 
-  // Model isolation filter to avoid cross-embedding corruption
+  // Model isolation filter to avoid mixing Gemini and Ollama embedding spaces.
   let modelFilter = '';
+  const targetProvider = options.embeddingProvider;
   const targetModel = options.embeddingModel;
+  if (targetProvider) {
+    params.push(targetProvider);
+    modelFilter += ` AND rc.embedding_provider = $${params.length}`;
+  }
   if (targetModel) {
     params.push(targetModel);
-    if (targetModel.startsWith('gemini')) {
-      modelFilter = `AND (rc.embedding_model IS NULL OR rc.embedding_model = $${params.length})`;
-    } else {
-      modelFilter = `AND rc.embedding_model = $${params.length}`;
-    }
+    modelFilter += ` AND rc.embedding_model = $${params.length}`;
   }
 
   const result = await pool.query(
@@ -307,6 +311,25 @@ function getActiveGenerationProvider() {
   return getGenerationProvider();
 }
 
+/**
+ * Detects whether a query is asking for a general document summary or overview,
+ * rather than a narrow factual retrieval question.
+ */
+function isSummaryQuery(query) {
+  if (!query || typeof query !== 'string') return false;
+  const q = query.trim().toLowerCase();
+  return (
+    /\bwhat\s+(this|the)\s+(pdf|document|file|notes|manual|syllabus|book|material)\s+consists?\b/i.test(q) ||
+    /\bwhat\s+(this|the)\s+(pdf|document|file|notes|manual|syllabus|book|material)\s+consists?\s+of\b/i.test(q) ||
+    /\bwhat\s+(does\s+)?(this|the)\s+(pdf|document|file|notes|manual|syllabus|book|material)\s+(contain|consist|cover|have|include|say)\b/i.test(q) ||
+    /\bwhat\s+is\s+(this|the)\s+(pdf|document|file|notes|manual|syllabus|book|material)\s+about\b/i.test(q) ||
+    /\bwhat('?s|\s+is)\s+in\s+(this|the)\s+(pdf|document|file|notes|manual|material)\b/i.test(q) ||
+    /\b(summarize|summary\s+of)\s+(this|the|all)?\s*(pdf|document|file|notes|manual|materials?)\b/i.test(q) ||
+    /\bwhat\s+topics\s+(are\s+)?covered\b/i.test(q) ||
+    /\boverview\s+of\s+(this|the)\s+(pdf|document|file|notes|manual|material)\b/i.test(q)
+  );
+}
+
 module.exports = {
   embedText,
   embedBatch,
@@ -316,4 +339,5 @@ module.exports = {
   generateMetadata,
   getActiveEmbeddingProvider,
   getActiveGenerationProvider,
+  isSummaryQuery,
 };

@@ -18,39 +18,39 @@ function getOllamaInstance() {
   return cachedOllamaProvider;
 }
 
+function normalizeEmbeddingName(value) {
+  const norm = String(value || '').trim().toLowerCase();
+  return norm === 'google' ? 'gemini' : norm;
+}
+
+function normalizeGenerationName(value) {
+  const norm = String(value || '').trim().toLowerCase();
+  return norm === 'gemini' ? 'google' : norm;
+}
+
 /**
  * Resolve the active embedding provider name from environment or defaults.
  * Explicit EMBEDDING_PROVIDER takes precedence.
- * Falls back to 'gemini' if GOOGLE_AI_API_KEY is present, otherwise 'ollama'.
+ * Default is Gemini so production never silently depends on local Ollama.
+ * Ollama is used only when EMBEDDING_PROVIDER=ollama.
  */
 function resolveEmbeddingProviderName(override) {
-  if (override) return override.toLowerCase();
+  if (override) return normalizeEmbeddingName(override);
   const envVal = process.env.EMBEDDING_PROVIDER;
-  if (envVal) {
-    const norm = envVal.trim().toLowerCase();
-    return norm === 'google' ? 'gemini' : norm;
-  }
-  if (process.env.GOOGLE_AI_API_KEY) {
-    return 'gemini';
-  }
-  return 'ollama';
+  if (envVal) return normalizeEmbeddingName(envVal);
+  return 'gemini';
 }
 
 /**
  * Resolve the active generation provider name from environment or defaults.
  * Explicit LLM_PROVIDER or GENERATION_PROVIDER takes precedence.
+ * Default is Google Gemini so a missing LLM_PROVIDER does not select Ollama or mock.
  */
 function resolveGenerationProviderName(override) {
-  if (override) return override.toLowerCase();
+  if (override) return normalizeGenerationName(override);
   const envVal = process.env.LLM_PROVIDER || process.env.GENERATION_PROVIDER;
-  if (envVal) {
-    const norm = envVal.trim().toLowerCase();
-    return norm === 'gemini' ? 'google' : norm;
-  }
-  if (process.env.GOOGLE_AI_API_KEY) {
-    return 'google';
-  }
-  return 'ollama';
+  if (envVal) return normalizeGenerationName(envVal);
+  return 'google';
 }
 
 /**

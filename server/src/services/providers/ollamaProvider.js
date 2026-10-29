@@ -3,7 +3,7 @@ const fetch = require('node-fetch');
 const DEFAULT_BASE_URL = 'http://127.0.0.1:11434';
 const DEFAULT_EMBEDDING_MODEL = 'nomic-embed-text';
 const DEFAULT_GENERATION_MODEL = 'llama3.2';
-const DEFAULT_TIMEOUT_MS = 30000;
+const DEFAULT_TIMEOUT_MS = 60000;
 const EXPECTED_EMBEDDING_DIMENSIONS = 768;
 
 function getBaseUrl() {
@@ -240,10 +240,15 @@ class OllamaProvider {
       .join('\n\n');
 
     const strictSystemPrompt = systemPrompt ||
-      `You are an academic assistant. Answer ONLY using the provided numbered context chunks. If the answer is not fully supported, return EXACTLY: "Not in provided material." Include numbered inline citations like [1]. Be concise.`;
+      `You are an academic assistant. Answer ONLY using the provided numbered context chunks.
+
+MANDATORY CITATION RULE:
+You MUST cite your sources using square bracket notation like [1], [2] throughout your answer. For example: "...covers crimping tools [1] and networking commands [2]."
+Every claim or listed point must include its bracketed citation [N].
+If the answer cannot be found in the context at all, return EXACTLY: "Not in provided material."`;
 
     const userPrompt = contextText
-      ? `CONTEXT FROM COURSE MATERIALS:\n\n${contextText}\n\n---\n\nSTUDENT QUESTION: ${question}\n\nAnswer using ONLY the context above. ALWAYS cite sources inline using the bracketed chunk number, for example [1].`
+      ? `CONTEXT FROM COURSE MATERIALS:\n\n${contextText}\n\n---\n\nSTUDENT QUESTION: ${question}\n\nAnswer using ONLY the context above. ALWAYS cite sources inline using bracketed numbers like [1] or [2].`
       : `QUESTION: ${question}\n\nAnswer concisely.`;
 
     let raw;
@@ -293,10 +298,19 @@ class OllamaProvider {
       answer = 'Not in provided material.';
     }
 
+    // Normalize citations if model outputted [Source 1], (Source 1), Source 1:, or (1)
+    const normalized = answer
+      .replace(/\[Source\s*(\d+)\]/gi, '[$1]')
+      .replace(/\(Source\s*(\d+)\)/gi, '[$1]')
+      .replace(/Source\s*(\d+):?/gi, '[$1]')
+      .replace(/\((\d+)\)/g, '[$1]');
+
     const notFoundExact = 'Not in provided material.';
     // Enforce citations or exact fallback
-    if (!answer.includes(notFoundExact) && !/\[\d+\]/.test(answer)) {
+    if (!normalized.includes(notFoundExact) && !/\[\d+\]/.test(normalized)) {
       answer = notFoundExact;
+    } else {
+      answer = normalized;
     }
 
     return {
@@ -314,7 +328,8 @@ class OllamaProvider {
    */
   async generateMetadata(chunks) {
     const model = this.generationModel;
-    const text = chunks.slice(0, 5).map((c) => c.content).join('\n\n');
+    // Take up to 3 chunks and max 4000 characters to keep prompt evaluation fast and prevent timeout
+    const text = chunks.slice(0, 3).map((c) => c.content).join('\n\n').slice(0, 4000);
 
     const prompt = `Analyze this academic content and provide:
 1. A concise 2-3 sentence summary

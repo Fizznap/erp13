@@ -44,6 +44,7 @@ services:
       - OLLAMA_EMBEDDING_MODEL=nomic-embed-text
       - OLLAMA_GENERATION_MODEL=llama3.2
       - REDIS_URL=redis://redis:6379
+      - OLLAMA_TIMEOUT_MS=90000
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -72,6 +73,7 @@ services:
       - OLLAMA_EMBEDDING_MODEL=nomic-embed-text
       - OLLAMA_GENERATION_MODEL=llama3.2
       - REDIS_URL=redis://redis:6379
+      - OLLAMA_TIMEOUT_MS=90000
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

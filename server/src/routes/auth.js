@@ -664,11 +664,35 @@ router.post('/complete-profile', authenticateOnboarding, async (req, res) => {
   const yearOfStudy = Number(body.yearOfStudy);
   const admissionYear = roll?.admissionYear;
   const expectedGraduationYear = Number(body.expectedGraduationYear);
-  const academicClassId = cleanString(body.academicClassId, 64, { required: true });
+  
+  // Try automatic class assignment first if no manual selection provided
+  let academicClassId = cleanString(body.academicClassId, 64);
+  let academicLabGroupId = cleanString(body.academicLabGroupId, 64);
   const hasBranchSelection = body.academicBranchId !== undefined || body.academicDivisionId !== undefined;
   const academicBranchId = hasBranchSelection ? cleanString(body.academicBranchId, 64, { required: true }) : null;
   const academicDivisionId = hasBranchSelection ? cleanString(body.academicDivisionId, 64, { required: true }) : null;
-  const academicLabGroupId = cleanString(body.academicLabGroupId, 64, { required: true });
+  
+  // If no manual class selection, try automatic assignment
+  if (!academicClassId || !academicLabGroupId) {
+    const { assignStudentToClass } = require('../services/classAssignment');
+    const autoAssignment = await assignStudentToClass(req.user.id, {
+      rollNumber,
+      collegeId,
+      admissionYear,
+      yearOfStudy,
+      db: pool
+    });
+    
+    if (autoAssignment.success) {
+      academicClassId = autoAssignment.classId;
+      academicLabGroupId = autoAssignment.labGroupId;
+      console.log(`Auto-assigned ${rollNumber} to class: ${autoAssignment.reason}`);
+    }
+  }
+  
+  // Validate required fields (after auto-assignment attempt)
+  if (!academicClassId) academicClassId = cleanString(body.academicClassId, 64, { required: true });
+  if (!academicLabGroupId) academicLabGroupId = cleanString(body.academicLabGroupId, 64, { required: true });
   const preferredName = cleanString(body.preferredName || '', 80);
   const phone = cleanString(body.phone || '', 32);
   const bio = cleanString(body.bio || '', 500);
@@ -853,3 +877,85 @@ router.patch('/me', authenticate, async (req, res) => {
 });
 
 module.exports = router;
+
+
+// GET /api/auth/verify-student/:identifier — Public endpoint to verify student ID cards
+// Accepts roll_number or college_id and returns public profile information
+router.get('/verify-student/:identifier', async (req, res) => {
+  try {
+    const identifier = req.params.identifier?.trim();
+    
+    if (!identifier) {
+      return res.status(400).json({ error: 'Student identifier is required' });
+    }
+
+    // Normalize identifier for case-insensitive lookup
+    const normalizedId = identifier.toUpperCase();
+
+    // Try to find by roll_number or college_id
+    const result = await pool.query(
+      `SELECT 
+        u.id,
+        u.full_name,
+        u.email,
+        u.role,
+        u.is_active,
+        p.roll_number,
+        p.college_id,
+        p.program,
+        p.expected_graduation_year,
+        p.preferred_name,
+        br.name AS branch_name,
+        br.code AS branch_code,
+        d.name AS division_name,
+        ba.start_year,
+        ba.end_year
+       FROM users u
+       LEFT JOIN user_profiles p ON p.user_id = u.id
+       LEFT JOIN academic_classes ac ON ac.id = u.academic_class_id
+       LEFT JOIN branches br ON br.id = ac.branch_id
+       LEFT JOIN divisions d ON d.id = ac.division_id
+       LEFT JOIN batches ba ON ba.id = ac.batch_id
+       WHERE u.role = 'student' 
+         AND u.is_active = true 
+         AND u.email_verified = true
+         AND (
+           UPPER(BTRIM(p.roll_number)) = $1 
+           OR UPPER(BTRIM(p.college_id)) = $1
+         )
+       LIMIT 1`,
+      [normalizedId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ 
+        error: 'Student not found',
+        message: 'This ID is not registered or the student account is not active.'
+      });
+    }
+
+    const student = result.rows[0];
+
+    // Return only public-safe information
+    res.json({
+      verified: true,
+      student: {
+        full_name: student.full_name,
+        student_no: student.roll_number || student.college_id,
+        program: student.program,
+        branch: student.branch_name,
+        branch_code: student.branch_code,
+        division: student.division_name,
+        batch: student.start_year && student.end_year 
+          ? `${student.start_year}-${student.end_year}` 
+          : null,
+        expected_graduation: student.expected_graduation_year,
+        role: student.role,
+        // Note: We deliberately do NOT include email or other sensitive data
+      },
+    });
+  } catch (err) {
+    console.error('Verify student error:', err);
+    res.status(500).json({ error: 'Failed to verify student' });
+  }
+});

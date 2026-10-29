@@ -22,7 +22,23 @@ function getTimeoutMs() {
 }
 
 function getApiKey() {
-  return process.env.GOOGLE_AI_API_KEY;
+  const key = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
+  if (!key) return undefined;
+  const trimmed = String(key).trim();
+  return trimmed || undefined;
+}
+
+function describeGoogleError(responseBody, status) {
+  try {
+    const parsed = JSON.parse(responseBody);
+    const errorStatus = parsed?.error?.status;
+    const details = Array.isArray(parsed?.error?.details) ? parsed.error.details : [];
+    const reason = details.find((detail) => detail && detail.reason)?.reason;
+    const parts = [errorStatus, reason].filter(Boolean);
+    return parts.length ? `${status} (${parts.join('/')})` : String(status);
+  } catch {
+    return String(status);
+  }
 }
 
 function getEmbeddingModel() {
@@ -97,7 +113,7 @@ class GeminiProvider {
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
-      throw new Error(`Embedding API error: ${response.status}`);
+      throw new Error(`Embedding API error: ${describeGoogleError(errText, response.status)}`);
     }
 
     const data = await response.json();
@@ -135,7 +151,7 @@ class GeminiProvider {
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
-      throw new Error(`Batch embedding API error: ${response.status}`);
+      throw new Error(`Batch embedding API error: ${describeGoogleError(errText, response.status)}`);
     }
 
     const data = await response.json();
@@ -211,7 +227,7 @@ class GeminiProvider {
 
     if (!response.ok) {
       const txt = await response.text().catch(() => '');
-      throw new Error(`Google Generative API error ${response.status}`);
+      throw new Error(`Google Generative API error ${describeGoogleError(txt, response.status)}`);
     }
 
     const json = await response.json();

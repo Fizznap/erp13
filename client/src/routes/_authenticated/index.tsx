@@ -26,7 +26,7 @@ const quick = [
   { label: "Classroom", icon: BookOpen, tint: "bg-lavender", to: "/subjects" },
   { label: "Attendance", icon: CalendarCheck, tint: "bg-mint", to: "/attendance" },
   { label: "Resources", icon: FolderOpen, tint: "bg-sky", to: "/resources" },
-  { label: "Results", icon: Award, tint: "bg-peach", to: "/subjects" },
+  { label: "Results", icon: Award, tint: "bg-peach", to: "/results" },
 ];
 
 function Home() {

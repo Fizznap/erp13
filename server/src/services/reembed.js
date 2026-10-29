@@ -89,4 +89,44 @@ async function reembedResource(resourceId, targetProviderName) {
   }
 }
 
-module.exports = { reembedResource };
+/**
+ * Inventory stored embedding providers/models without mutating data.
+ * Used to decide whether a resource-scoped Gemini re-embed is required.
+ */
+async function inspectEmbeddingInventory() {
+  const [resourceCounts, chunkCounts, mixedResources] = await Promise.all([
+    pool.query(
+      `SELECT COALESCE(embedding_provider, 'unknown') AS embedding_provider,
+              COALESCE(embedding_model, 'unknown') AS embedding_model,
+              COUNT(*)::int AS resource_count
+       FROM resources
+       GROUP BY 1, 2
+       ORDER BY 1, 2`
+    ),
+    pool.query(
+      `SELECT COALESCE(embedding_provider, 'unknown') AS embedding_provider,
+              COALESCE(embedding_model, 'unknown') AS embedding_model,
+              COUNT(*)::int AS chunk_count
+       FROM resource_chunks
+       GROUP BY 1, 2
+       ORDER BY 1, 2`
+    ),
+    pool.query(
+      `SELECT resource_id,
+              COUNT(DISTINCT embedding_provider)::int AS provider_count,
+              COUNT(DISTINCT embedding_model)::int AS model_count
+       FROM resource_chunks
+       GROUP BY resource_id
+       HAVING COUNT(DISTINCT embedding_provider) > 1
+           OR COUNT(DISTINCT embedding_model) > 1`
+    ),
+  ]);
+
+  return {
+    resources: resourceCounts.rows,
+    chunks: chunkCounts.rows,
+    mixedResources: mixedResources.rows,
+  };
+}
+
+module.exports = { reembedResource, inspectEmbeddingInventory };

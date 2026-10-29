@@ -24,8 +24,18 @@ import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authentic
 import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated/profile'
 import { Route as AuthenticatedRemindersRouteImport } from './routes/_authenticated/reminders'
 import { Route as AuthenticatedResourcesRouteImport } from './routes/_authenticated/resources'
+import { Route as AuthenticatedResultsRouteImport } from './routes/_authenticated/results'
 import { Route as AuthenticatedSubjectsRouteImport } from './routes/_authenticated/subjects'
 import { Route as VerifyStudentNoRouteImport } from './routes/verify.$studentNo'
+import { Route as AuthenticatedAdminIndexRouteImport } from './routes/_authenticated/admin/index'
+import { Route as AuthenticatedAdminAcademicRouteImport } from './routes/_authenticated/admin/academic'
+import { Route as AuthenticatedAdminAnalyticsRouteImport } from './routes/_authenticated/admin/analytics'
+import { Route as AuthenticatedAdminAttendanceRouteImport } from './routes/_authenticated/admin/attendance'
+import { Route as AuthenticatedAdminFacultyRouteImport } from './routes/_authenticated/admin/faculty'
+import { Route as AuthenticatedAdminResultsRouteImport } from './routes/_authenticated/admin/results'
+import { Route as AuthenticatedAdminSettingsRouteImport } from './routes/_authenticated/admin/settings'
+import { Route as AuthenticatedAdminStudentsRouteImport } from './routes/_authenticated/admin/students'
+import { Route as AuthenticatedAdminSubjectsRouteImport } from './routes/_authenticated/admin/subjects'
 import { Route as AuthenticatedSubjectsIndexRouteImport } from './routes/_authenticated/subjects.index'
 import { Route as AuthenticatedSubjectsSubjectIdRouteImport } from './routes/_authenticated/subjects.$subjectId'
 
@@ -103,6 +113,11 @@ const AuthenticatedResourcesRoute = AuthenticatedResourcesRouteImport.update({
   path: '/resources',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedResultsRoute = AuthenticatedResultsRouteImport.update({
+  id: '/results',
+  path: '/results',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedSubjectsRoute = AuthenticatedSubjectsRouteImport.update({
   id: '/subjects',
   path: '/subjects',
@@ -113,6 +128,59 @@ const VerifyStudentNoRoute = VerifyStudentNoRouteImport.update({
   path: '/verify/$studentNo',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedAdminIndexRoute = AuthenticatedAdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AuthenticatedAdminRoute,
+} as any)
+const AuthenticatedAdminAcademicRoute =
+  AuthenticatedAdminAcademicRouteImport.update({
+    id: '/academic',
+    path: '/academic',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
+const AuthenticatedAdminAnalyticsRoute =
+  AuthenticatedAdminAnalyticsRouteImport.update({
+    id: '/analytics',
+    path: '/analytics',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
+const AuthenticatedAdminAttendanceRoute =
+  AuthenticatedAdminAttendanceRouteImport.update({
+    id: '/attendance',
+    path: '/attendance',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
+const AuthenticatedAdminFacultyRoute =
+  AuthenticatedAdminFacultyRouteImport.update({
+    id: '/faculty',
+    path: '/faculty',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
+const AuthenticatedAdminResultsRoute =
+  AuthenticatedAdminResultsRouteImport.update({
+    id: '/results',
+    path: '/results',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
+const AuthenticatedAdminSettingsRoute =
+  AuthenticatedAdminSettingsRouteImport.update({
+    id: '/settings',
+    path: '/settings',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
+const AuthenticatedAdminStudentsRoute =
+  AuthenticatedAdminStudentsRouteImport.update({
+    id: '/students',
+    path: '/students',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
+const AuthenticatedAdminSubjectsRoute =
+  AuthenticatedAdminSubjectsRouteImport.update({
+    id: '/subjects',
+    path: '/subjects',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
 const AuthenticatedSubjectsIndexRoute =
   AuthenticatedSubjectsIndexRouteImport.update({
     id: '/',
@@ -132,7 +200,7 @@ export interface FileRoutesByFullPath {
   '/complete-profile': typeof CompleteProfileRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
-  '/admin': typeof AuthenticatedAdminRoute
+  '/admin': typeof AuthenticatedAdminRouteWithChildren
   '/ask': typeof AuthenticatedAskRoute
   '/attendance': typeof AuthenticatedAttendanceRoute
   '/face-setup': typeof AuthenticatedFaceSetupRoute
@@ -141,9 +209,19 @@ export interface FileRoutesByFullPath {
   '/profile': typeof AuthenticatedProfileRoute
   '/reminders': typeof AuthenticatedRemindersRoute
   '/resources': typeof AuthenticatedResourcesRoute
+  '/results': typeof AuthenticatedResultsRoute
   '/subjects': typeof AuthenticatedSubjectsRouteWithChildren
   '/verify/$studentNo': typeof VerifyStudentNoRoute
+  '/admin/academic': typeof AuthenticatedAdminAcademicRoute
+  '/admin/analytics': typeof AuthenticatedAdminAnalyticsRoute
+  '/admin/attendance': typeof AuthenticatedAdminAttendanceRoute
+  '/admin/faculty': typeof AuthenticatedAdminFacultyRoute
+  '/admin/results': typeof AuthenticatedAdminResultsRoute
+  '/admin/settings': typeof AuthenticatedAdminSettingsRoute
+  '/admin/students': typeof AuthenticatedAdminStudentsRoute
+  '/admin/subjects': typeof AuthenticatedAdminSubjectsRoute
   '/subjects/$subjectId': typeof AuthenticatedSubjectsSubjectIdRoute
+  '/admin/': typeof AuthenticatedAdminIndexRoute
   '/subjects/': typeof AuthenticatedSubjectsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -151,7 +229,6 @@ export interface FileRoutesByTo {
   '/complete-profile': typeof CompleteProfileRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
-  '/admin': typeof AuthenticatedAdminRoute
   '/ask': typeof AuthenticatedAskRoute
   '/attendance': typeof AuthenticatedAttendanceRoute
   '/face-setup': typeof AuthenticatedFaceSetupRoute
@@ -160,9 +237,19 @@ export interface FileRoutesByTo {
   '/profile': typeof AuthenticatedProfileRoute
   '/reminders': typeof AuthenticatedRemindersRoute
   '/resources': typeof AuthenticatedResourcesRoute
+  '/results': typeof AuthenticatedResultsRoute
   '/verify/$studentNo': typeof VerifyStudentNoRoute
   '/': typeof AuthenticatedIndexRoute
+  '/admin/academic': typeof AuthenticatedAdminAcademicRoute
+  '/admin/analytics': typeof AuthenticatedAdminAnalyticsRoute
+  '/admin/attendance': typeof AuthenticatedAdminAttendanceRoute
+  '/admin/faculty': typeof AuthenticatedAdminFacultyRoute
+  '/admin/results': typeof AuthenticatedAdminResultsRoute
+  '/admin/settings': typeof AuthenticatedAdminSettingsRoute
+  '/admin/students': typeof AuthenticatedAdminStudentsRoute
+  '/admin/subjects': typeof AuthenticatedAdminSubjectsRoute
   '/subjects/$subjectId': typeof AuthenticatedSubjectsSubjectIdRoute
+  '/admin': typeof AuthenticatedAdminIndexRoute
   '/subjects': typeof AuthenticatedSubjectsIndexRoute
 }
 export interface FileRoutesById {
@@ -172,7 +259,7 @@ export interface FileRoutesById {
   '/complete-profile': typeof CompleteProfileRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
-  '/_authenticated/admin': typeof AuthenticatedAdminRoute
+  '/_authenticated/admin': typeof AuthenticatedAdminRouteWithChildren
   '/_authenticated/ask': typeof AuthenticatedAskRoute
   '/_authenticated/attendance': typeof AuthenticatedAttendanceRoute
   '/_authenticated/face-setup': typeof AuthenticatedFaceSetupRoute
@@ -181,10 +268,20 @@ export interface FileRoutesById {
   '/_authenticated/profile': typeof AuthenticatedProfileRoute
   '/_authenticated/reminders': typeof AuthenticatedRemindersRoute
   '/_authenticated/resources': typeof AuthenticatedResourcesRoute
+  '/_authenticated/results': typeof AuthenticatedResultsRoute
   '/_authenticated/subjects': typeof AuthenticatedSubjectsRouteWithChildren
   '/verify/$studentNo': typeof VerifyStudentNoRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/admin/academic': typeof AuthenticatedAdminAcademicRoute
+  '/_authenticated/admin/analytics': typeof AuthenticatedAdminAnalyticsRoute
+  '/_authenticated/admin/attendance': typeof AuthenticatedAdminAttendanceRoute
+  '/_authenticated/admin/faculty': typeof AuthenticatedAdminFacultyRoute
+  '/_authenticated/admin/results': typeof AuthenticatedAdminResultsRoute
+  '/_authenticated/admin/settings': typeof AuthenticatedAdminSettingsRoute
+  '/_authenticated/admin/students': typeof AuthenticatedAdminStudentsRoute
+  '/_authenticated/admin/subjects': typeof AuthenticatedAdminSubjectsRoute
   '/_authenticated/subjects/$subjectId': typeof AuthenticatedSubjectsSubjectIdRoute
+  '/_authenticated/admin/': typeof AuthenticatedAdminIndexRoute
   '/_authenticated/subjects/': typeof AuthenticatedSubjectsIndexRoute
 }
 export interface FileRouteTypes {
@@ -204,9 +301,19 @@ export interface FileRouteTypes {
     | '/profile'
     | '/reminders'
     | '/resources'
+    | '/results'
     | '/subjects'
     | '/verify/$studentNo'
+    | '/admin/academic'
+    | '/admin/analytics'
+    | '/admin/attendance'
+    | '/admin/faculty'
+    | '/admin/results'
+    | '/admin/settings'
+    | '/admin/students'
+    | '/admin/subjects'
     | '/subjects/$subjectId'
+    | '/admin/'
     | '/subjects/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -214,7 +321,6 @@ export interface FileRouteTypes {
     | '/complete-profile'
     | '/forgot-password'
     | '/reset-password'
-    | '/admin'
     | '/ask'
     | '/attendance'
     | '/face-setup'
@@ -223,9 +329,19 @@ export interface FileRouteTypes {
     | '/profile'
     | '/reminders'
     | '/resources'
+    | '/results'
     | '/verify/$studentNo'
     | '/'
+    | '/admin/academic'
+    | '/admin/analytics'
+    | '/admin/attendance'
+    | '/admin/faculty'
+    | '/admin/results'
+    | '/admin/settings'
+    | '/admin/students'
+    | '/admin/subjects'
     | '/subjects/$subjectId'
+    | '/admin'
     | '/subjects'
   id:
     | '__root__'
@@ -243,10 +359,20 @@ export interface FileRouteTypes {
     | '/_authenticated/profile'
     | '/_authenticated/reminders'
     | '/_authenticated/resources'
+    | '/_authenticated/results'
     | '/_authenticated/subjects'
     | '/verify/$studentNo'
     | '/_authenticated/'
+    | '/_authenticated/admin/academic'
+    | '/_authenticated/admin/analytics'
+    | '/_authenticated/admin/attendance'
+    | '/_authenticated/admin/faculty'
+    | '/_authenticated/admin/results'
+    | '/_authenticated/admin/settings'
+    | '/_authenticated/admin/students'
+    | '/_authenticated/admin/subjects'
     | '/_authenticated/subjects/$subjectId'
+    | '/_authenticated/admin/'
     | '/_authenticated/subjects/'
   fileRoutesById: FileRoutesById
 }
@@ -366,6 +492,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedResourcesRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/results': {
+      id: '/_authenticated/results'
+      path: '/results'
+      fullPath: '/results'
+      preLoaderRoute: typeof AuthenticatedResultsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/subjects': {
       id: '/_authenticated/subjects'
       path: '/subjects'
@@ -379,6 +512,69 @@ declare module '@tanstack/react-router' {
       fullPath: '/verify/$studentNo'
       preLoaderRoute: typeof VerifyStudentNoRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/admin/': {
+      id: '/_authenticated/admin/'
+      path: '/'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AuthenticatedAdminIndexRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
+    '/_authenticated/admin/academic': {
+      id: '/_authenticated/admin/academic'
+      path: '/academic'
+      fullPath: '/admin/academic'
+      preLoaderRoute: typeof AuthenticatedAdminAcademicRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
+    '/_authenticated/admin/analytics': {
+      id: '/_authenticated/admin/analytics'
+      path: '/analytics'
+      fullPath: '/admin/analytics'
+      preLoaderRoute: typeof AuthenticatedAdminAnalyticsRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
+    '/_authenticated/admin/attendance': {
+      id: '/_authenticated/admin/attendance'
+      path: '/attendance'
+      fullPath: '/admin/attendance'
+      preLoaderRoute: typeof AuthenticatedAdminAttendanceRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
+    '/_authenticated/admin/faculty': {
+      id: '/_authenticated/admin/faculty'
+      path: '/faculty'
+      fullPath: '/admin/faculty'
+      preLoaderRoute: typeof AuthenticatedAdminFacultyRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
+    '/_authenticated/admin/results': {
+      id: '/_authenticated/admin/results'
+      path: '/results'
+      fullPath: '/admin/results'
+      preLoaderRoute: typeof AuthenticatedAdminResultsRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
+    '/_authenticated/admin/settings': {
+      id: '/_authenticated/admin/settings'
+      path: '/settings'
+      fullPath: '/admin/settings'
+      preLoaderRoute: typeof AuthenticatedAdminSettingsRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
+    '/_authenticated/admin/students': {
+      id: '/_authenticated/admin/students'
+      path: '/students'
+      fullPath: '/admin/students'
+      preLoaderRoute: typeof AuthenticatedAdminStudentsRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
+    '/_authenticated/admin/subjects': {
+      id: '/_authenticated/admin/subjects'
+      path: '/subjects'
+      fullPath: '/admin/subjects'
+      preLoaderRoute: typeof AuthenticatedAdminSubjectsRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
     }
     '/_authenticated/subjects/': {
       id: '/_authenticated/subjects/'
@@ -397,6 +593,33 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AuthenticatedAdminRouteChildren {
+  AuthenticatedAdminAcademicRoute: typeof AuthenticatedAdminAcademicRoute
+  AuthenticatedAdminAnalyticsRoute: typeof AuthenticatedAdminAnalyticsRoute
+  AuthenticatedAdminAttendanceRoute: typeof AuthenticatedAdminAttendanceRoute
+  AuthenticatedAdminFacultyRoute: typeof AuthenticatedAdminFacultyRoute
+  AuthenticatedAdminResultsRoute: typeof AuthenticatedAdminResultsRoute
+  AuthenticatedAdminSettingsRoute: typeof AuthenticatedAdminSettingsRoute
+  AuthenticatedAdminStudentsRoute: typeof AuthenticatedAdminStudentsRoute
+  AuthenticatedAdminSubjectsRoute: typeof AuthenticatedAdminSubjectsRoute
+  AuthenticatedAdminIndexRoute: typeof AuthenticatedAdminIndexRoute
+}
+
+const AuthenticatedAdminRouteChildren: AuthenticatedAdminRouteChildren = {
+  AuthenticatedAdminAcademicRoute: AuthenticatedAdminAcademicRoute,
+  AuthenticatedAdminAnalyticsRoute: AuthenticatedAdminAnalyticsRoute,
+  AuthenticatedAdminAttendanceRoute: AuthenticatedAdminAttendanceRoute,
+  AuthenticatedAdminFacultyRoute: AuthenticatedAdminFacultyRoute,
+  AuthenticatedAdminResultsRoute: AuthenticatedAdminResultsRoute,
+  AuthenticatedAdminSettingsRoute: AuthenticatedAdminSettingsRoute,
+  AuthenticatedAdminStudentsRoute: AuthenticatedAdminStudentsRoute,
+  AuthenticatedAdminSubjectsRoute: AuthenticatedAdminSubjectsRoute,
+  AuthenticatedAdminIndexRoute: AuthenticatedAdminIndexRoute,
+}
+
+const AuthenticatedAdminRouteWithChildren =
+  AuthenticatedAdminRoute._addFileChildren(AuthenticatedAdminRouteChildren)
+
 interface AuthenticatedSubjectsRouteChildren {
   AuthenticatedSubjectsSubjectIdRoute: typeof AuthenticatedSubjectsSubjectIdRoute
   AuthenticatedSubjectsIndexRoute: typeof AuthenticatedSubjectsIndexRoute
@@ -413,7 +636,7 @@ const AuthenticatedSubjectsRouteWithChildren =
   )
 
 interface AuthenticatedRouteRouteChildren {
-  AuthenticatedAdminRoute: typeof AuthenticatedAdminRoute
+  AuthenticatedAdminRoute: typeof AuthenticatedAdminRouteWithChildren
   AuthenticatedAskRoute: typeof AuthenticatedAskRoute
   AuthenticatedAttendanceRoute: typeof AuthenticatedAttendanceRoute
   AuthenticatedFaceSetupRoute: typeof AuthenticatedFaceSetupRoute
@@ -422,12 +645,13 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedProfileRoute: typeof AuthenticatedProfileRoute
   AuthenticatedRemindersRoute: typeof AuthenticatedRemindersRoute
   AuthenticatedResourcesRoute: typeof AuthenticatedResourcesRoute
+  AuthenticatedResultsRoute: typeof AuthenticatedResultsRoute
   AuthenticatedSubjectsRoute: typeof AuthenticatedSubjectsRouteWithChildren
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
-  AuthenticatedAdminRoute: AuthenticatedAdminRoute,
+  AuthenticatedAdminRoute: AuthenticatedAdminRouteWithChildren,
   AuthenticatedAskRoute: AuthenticatedAskRoute,
   AuthenticatedAttendanceRoute: AuthenticatedAttendanceRoute,
   AuthenticatedFaceSetupRoute: AuthenticatedFaceSetupRoute,
@@ -436,6 +660,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedProfileRoute: AuthenticatedProfileRoute,
   AuthenticatedRemindersRoute: AuthenticatedRemindersRoute,
   AuthenticatedResourcesRoute: AuthenticatedResourcesRoute,
+  AuthenticatedResultsRoute: AuthenticatedResultsRoute,
   AuthenticatedSubjectsRoute: AuthenticatedSubjectsRouteWithChildren,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
 }

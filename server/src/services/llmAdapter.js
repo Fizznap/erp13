@@ -7,10 +7,18 @@
 const fetch = require('node-fetch');
 require('dotenv').config();
 
-const PROVIDER = process.env.LLM_PROVIDER || 'mock';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY;
-const GOOGLE_AI_API_KEY = process.env.GOOGLE_AI_API_KEY;
 const GOOGLE_API_TIMEOUT_MS = Math.max(1000, Number(process.env.GOOGLE_AI_TIMEOUT_MS) || 30000);
+
+function getGoogleApiKey() {
+  const key = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
+  return key && String(key).trim() ? String(key).trim() : null;
+}
+
+function resolveActiveGenerationProvider() {
+  const { resolveGenerationProviderName } = require('./providers');
+  return resolveGenerationProviderName();
+}
 
 function buildContextPrompt(question, numberedContext, systemPrompt) {
   // Build a single prompt body that we will pass to the LLM
@@ -61,7 +69,7 @@ async function generateGoogle({ question, numberedContext, systemPrompt }) {
   const model = process.env.GOOGLE_AI_MODEL || 'gemini-3.1-flash-lite';
   const maxOutputTokens = Number(process.env.GOOGLE_AI_MAX_OUTPUT_TOKENS || 800);
 
-  const apiKey = process.env.GOOGLE_AI_API_KEY || null;
+  const apiKey = getGoogleApiKey();
 
   const body = {
     contents: [{ role: 'user', parts: [{ text: promptText }] }],
@@ -126,7 +134,7 @@ async function generateMock({ question, numberedContext, systemPrompt, temperatu
 async function generateAnswer({ question, numberedContext = [], systemPrompt = null, temperature = 0.0 }) {
   // Enforce a strict default system prompt if none provided
   const strictSystemPrompt = systemPrompt || `You are an academic assistant. Answer ONLY using the provided numbered context chunks. If the answer is not fully supported, return EXACTLY: "Not in provided material." Include numbered inline citations like [1]. Be concise.`;
-  const activeProvider = (process.env.LLM_PROVIDER || process.env.GENERATION_PROVIDER || PROVIDER).toLowerCase();
+  const activeProvider = resolveActiveGenerationProvider();
 
   if (activeProvider === 'openai') {
     return generateOpenAI({ question, numberedContext, systemPrompt: strictSystemPrompt, temperature });
@@ -142,7 +150,7 @@ async function generateAnswer({ question, numberedContext = [], systemPrompt = n
 }
 
 function getActiveGenerationProvider() {
-  const activeProvider = (process.env.LLM_PROVIDER || process.env.GENERATION_PROVIDER || PROVIDER).toLowerCase();
+  const activeProvider = resolveActiveGenerationProvider();
   if (activeProvider === 'ollama') {
     return {
       name: 'ollama',

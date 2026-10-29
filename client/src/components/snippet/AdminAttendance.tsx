@@ -37,6 +37,10 @@ type RosterStudent = {
   roll_number: string | null;
   status: "present" | "absent" | "needs_review";
   marked_at: string | null;
+  record_id?: string;
+  corrected_at?: string | null;
+  correction_reason?: string | null;
+  original_status?: string | null;
 };
 
 export function AdminAttendance() {
@@ -361,10 +365,18 @@ export function AdminAttendance() {
               {attendees.data?.map((s) => (
                 <div key={s.student_id} className="flex items-center justify-between py-2 text-xs">
                   <div className="min-w-0 pr-2">
-                    <p className="truncate font-medium">{s.full_name}</p>
+                    <p className="truncate font-medium">
+                      {s.full_name}
+                      {s.corrected_at && (
+                        <span className="ml-1.5 rounded-sm bg-amber-500/20 px-1 py-0.5 text-[10px] text-amber-300 font-normal">
+                          Corrected ({s.original_status} → {s.status})
+                        </span>
+                      )}
+                    </p>
                     <p className="truncate text-[11px] opacity-60">
                       {s.roll_number || "No PRN"}
                       {s.marked_at ? ` · ${new Date(s.marked_at).toLocaleTimeString()}` : ""}
+                      {s.correction_reason ? ` · Reason: ${s.correction_reason}` : ""}
                     </p>
                   </div>
                   <button

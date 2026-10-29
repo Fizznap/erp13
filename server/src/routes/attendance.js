@@ -448,9 +448,11 @@ router.get('/:sessionId/roster', authenticate, authorize('faculty', 'admin'), as
     const result = await pool.query(
       `SELECT u.id AS student_id, COALESCE(p.preferred_name, u.full_name) AS full_name,
               p.roll_number, u.email,
+              ar.id AS record_id,
               CASE WHEN ar.status = 'rejected' THEN 'needs_review'
                    ELSE COALESCE(ar.status, 'absent') END AS status, ar.marked_at,
-              ar.verification_method, ar.rejection_reason
+              ar.verification_method, ar.rejection_reason,
+              ar.corrected_at, ar.corrected_by, ar.correction_reason, ar.original_status
        FROM users u
        JOIN academic_classes student_class ON student_class.id = u.academic_class_id
        LEFT JOIN user_profiles p ON p.user_id = u.id
@@ -469,11 +471,63 @@ router.get('/:sessionId/roster', authenticate, authorize('faculty', 'admin'), as
   }
 });
 
+// POST /api/attendance/records/:recordId/correct — authorized corrections requiring reason field
+router.post('/records/:recordId/correct', authenticate, authorize('faculty', 'admin'), async (req, res) => {
+  try {
+    const { status, reason } = req.body || {};
+    if (!['present', 'absent'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be present or absent' });
+    }
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+      return res.status(400).json({ error: 'A correction reason is required' });
+    }
+    if (reason.length > 500) {
+      return res.status(400).json({ error: 'Correction reason must be 500 characters or fewer' });
+    }
+
+    const existing = await pool.query(
+      `SELECT r.*, s.faculty_id
+       FROM attendance_records r
+       JOIN attendance_sessions s ON s.id = r.session_id
+       WHERE r.id = $1`,
+      [req.params.recordId]
+    );
+
+    if (!existing.rows.length) {
+      return res.status(404).json({ error: 'Attendance record not found' });
+    }
+
+    const rec = existing.rows[0];
+    if (req.user.role !== 'admin' && rec.faculty_id !== req.user.id) {
+      return res.status(403).json({ error: 'You do not have permission to correct this record' });
+    }
+
+    const originalStatus = rec.original_status || rec.status;
+    const result = await pool.query(
+      `UPDATE attendance_records
+       SET status = $1,
+           original_status = $2,
+           corrected_by = $3,
+           corrected_at = now(),
+           correction_reason = $4
+       WHERE id = $5
+       RETURNING id, session_id, student_id, status, original_status, corrected_by, corrected_at, correction_reason`,
+      [status, originalStatus, req.user.id, reason.trim(), req.params.recordId]
+    );
+
+    res.json({ record: result.rows[0] });
+  } catch (err) {
+    console.error('Attendance correction error:', err);
+    res.status(500).json({ error: 'Could not correct attendance record' });
+  }
+});
+
 // PUT /api/attendance/:sessionId/roster/:studentId — faculty can correct attendance later.
 router.put('/:sessionId/roster/:studentId', authenticate, authorize('faculty', 'admin'), async (req, res) => {
   try {
-    const { status, note = '' } = req.body || {};
-    if (!['present', 'absent'].includes(status) || typeof note !== 'string' || note.length > 255) {
+    const { status, note = '', reason = '' } = req.body || {};
+    const correctionReason = (reason || note || '').trim();
+    if (!['present', 'absent'].includes(status) || typeof correctionReason !== 'string' || correctionReason.length > 255) {
       return res.status(400).json({ error: 'Status must be present or absent and note must be 255 characters or fewer' });
     }
     const session = await loadSessionScope(req.params.sessionId);
@@ -485,15 +539,31 @@ router.put('/:sessionId/roster/:studentId', authenticate, authorize('faculty', '
     if (!await isSessionRosterStudent(session, req.params.studentId)) {
       return res.status(403).json({ error: 'Student is not enrolled in this division or lab group' });
     }
+
     const result = await pool.query(
       `INSERT INTO attendance_records
-       (session_id, student_id, latitude, longitude, distance_meters, status, rejection_reason, verification_method)
-       VALUES ($1, $2, 0, 0, 0, $3, $4, 'faculty_manual')
+       (session_id, student_id, latitude, longitude, distance_meters, status, rejection_reason, verification_method,
+        corrected_by, corrected_at, correction_reason, original_status)
+       VALUES ($1, $2, 0, 0, 0, $3, $4, 'faculty_manual', $5, now(), $6, $3)
        ON CONFLICT (session_id, student_id) DO UPDATE SET
-         status = EXCLUDED.status, rejection_reason = EXCLUDED.rejection_reason,
-         verification_method = 'faculty_manual', marked_at = now()
-       RETURNING id, student_id, status, marked_at, verification_method, rejection_reason`,
-      [req.params.sessionId, req.params.studentId, status, note.trim() || null]
+         status = EXCLUDED.status,
+         rejection_reason = EXCLUDED.rejection_reason,
+         verification_method = 'faculty_manual',
+         marked_at = now(),
+         corrected_by = EXCLUDED.corrected_by,
+         corrected_at = now(),
+         correction_reason = EXCLUDED.correction_reason,
+         original_status = COALESCE(attendance_records.original_status, attendance_records.status)
+       RETURNING id, student_id, status, marked_at, verification_method, rejection_reason,
+                 corrected_by, corrected_at, correction_reason, original_status`,
+      [
+        req.params.sessionId,
+        req.params.studentId,
+        status,
+        correctionReason || null,
+        req.user.id,
+        correctionReason || null,
+      ]
     );
     res.json({ student: result.rows[0] });
   } catch (err) {

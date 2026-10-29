@@ -1,7 +1,7 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Camera, FileText, Mic, ArrowUp } from "lucide-react";
-import { useState, useEffect } from "react";
+import { ArrowLeft, Camera, FileText, Mic, ArrowUp, AlertCircle, RotateCcw } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
 import { AppShell, Spark } from "@/components/snippet/AppShell";
 import { api, fetchSubjects, SUBJECTS_QUERY_KEY } from "@/lib/api";
 
@@ -19,9 +19,55 @@ export const Route = createFileRoute("/_authenticated/ask")({
   component: Ask,
 });
 
-const prompts = ["Explain 3NF with an example", "Summarise Unit 2 of OS", "Quiz me on TCP vs UDP"];
+function getSubjectPrompts(subj?: { name: string; code: string }) {
+  if (!subj) return ["Explain 3NF with an example", "Summarise Unit 2 of OS", "Quiz me on TCP vs UDP"];
+  const lower = `${subj.name} ${subj.code}`.toLowerCase();
+  if (lower.includes("network") || lower.includes("cn")) {
+    return [
+      "What are the main functions of network crimping tools?",
+      "Summarise the Computer Networks lab manual",
+      "Explain the difference between TCP and UDP protocols",
+    ];
+  }
+  if (lower.includes("data structure") || lower.includes("dsa")) {
+    return [
+      "Explain the difference between BFS and DFS traversal",
+      "How do balanced binary search trees maintain O(log n) height?",
+      "Quiz me on dynamic programming vs greedy approaches",
+    ];
+  }
+  if (lower.includes("database") || lower.includes("dbms")) {
+    return [
+      "Explain 3NF and BCNF normalization with examples",
+      "What are ACID properties in database transactions?",
+      "How do B-Tree indexes speed up range queries?",
+    ];
+  }
+  if (lower.includes("operating") || lower.includes("os")) {
+    return [
+      "Explain the difference between process and thread",
+      "How does the virtual memory page replacement work?",
+      "What is deadlock and what are the 4 Coffman conditions?",
+    ];
+  }
+  return [
+    `Summarise key topics in ${subj.name}`,
+    `Generate 3 practice questions for ${subj.name}`,
+    `Explain the foundational concepts in ${subj.code}`,
+  ];
+}
 
-type Msg = { role: "user" | "ai"; text: string; sources?: any[] };
+type MsgStatus = "pending" | "done" | "unsupported" | "error" | "processing";
+
+type Msg = {
+  id: string;
+  role: "user" | "ai";
+  text: string;
+  sources?: any[];
+  status?: MsgStatus;
+  queryToRetry?: string;
+  errorMessage?: string;
+};
 
 function Ask() {
   const router = useRouter();
@@ -34,6 +80,8 @@ function Ask() {
   const [input, setInput] = useState("");
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [loading, setLoading] = useState(false);
+  const requestSeq = useRef(0);
+  const isSubmittingRef = useRef(false);
 
   useEffect(() => {
     if (!subject && subjects.length > 0) {
@@ -41,38 +89,90 @@ function Ask() {
     }
   }, [subject, subjects]);
 
+  const activeSubjectObj = subjects.find(
+    (s: any) => s.id === (subject || (subjects.length > 0 ? subjects[0]?.id : ""))
+  );
+  const activePrompts = getSubjectPrompts(activeSubjectObj);
+
   const send = async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed || loading) return;
+    if (!trimmed || isSubmittingRef.current || loading) return;
 
     const currentSubjectId = subject || (subjects.length > 0 ? subjects[0]?.id : "");
 
-    setMsgs((m) => [...m, { role: "user", text: trimmed }]);
+    const requestId = ++requestSeq.current;
+    const userMsgId = `user-${Date.now()}-${requestId}`;
+    const aiMsgId = `ai-${Date.now()}-${requestId}`;
+
+    setMsgs((m) => [
+      ...m,
+      { id: userMsgId, role: "user", text: trimmed, status: "done" },
+      { id: aiMsgId, role: "ai", text: "", status: "pending", queryToRetry: trimmed },
+    ]);
     setInput("");
 
     if (!currentSubjectId) {
-      setMsgs((m) => [
-        ...m,
-        {
-          role: "ai",
-          text: "No subjects or course materials have been assigned to your account yet. Ask Snippet answers questions grounded in your faculty's uploaded notes, slides, and PDFs.\n\nPlease ask your administrator or faculty to assign your class sections and upload syllabus materials.",
-        },
-      ]);
+      setMsgs((m) =>
+        m.map((msg) =>
+          msg.id === aiMsgId
+            ? {
+                ...msg,
+                text: "No subjects or course materials have been assigned to your account yet. Ask Snippet answers questions grounded in your faculty's uploaded notes, slides, and PDFs.\n\nPlease ask your administrator or faculty to assign your class sections and upload syllabus materials.",
+                status: "done",
+              }
+            : msg
+        )
+      );
       return;
     }
 
+    isSubmittingRef.current = true;
     setLoading(true);
 
     try {
-      const res = await api<{ answer: string; sources: any[] }>("/ask", {
+      const res = await api<{ answer: string; sources: any[]; wasFound?: boolean; isProcessing?: boolean }>("/ask", {
         method: "POST",
         body: { query: trimmed, subjectId: currentSubjectId },
       });
-      setMsgs((m) => [...m, { role: "ai", text: res.answer, sources: res.sources }]);
+
+      if (requestId !== requestSeq.current) return;
+
+      const answer = typeof res.answer === "string" ? res.answer : "";
+      let status: MsgStatus = "done";
+      if (res.isProcessing) status = "processing";
+      else if (answer === "Not in provided material.") status = "unsupported";
+
+      setMsgs((m) =>
+        m.map((msg) =>
+          msg.id === aiMsgId
+            ? {
+                ...msg,
+                text: answer,
+                sources: status === "done" ? res.sources : undefined,
+                status,
+              }
+            : msg
+        )
+      );
     } catch (err: any) {
-      setMsgs((m) => [...m, { role: "ai", text: err.message || "Failed to get answer." }]);
+      if (requestId !== requestSeq.current) return;
+      setMsgs((m) =>
+        m.map((msg) =>
+          msg.id === aiMsgId
+            ? {
+                ...msg,
+                text: "",
+                errorMessage: err.message || "Failed to process question. Please check connection and try again.",
+                status: "error",
+              }
+            : msg
+        )
+      );
     } finally {
-      setLoading(false);
+      if (requestId === requestSeq.current) {
+        isSubmittingRef.current = false;
+        setLoading(false);
+      }
     }
   };
 
@@ -103,7 +203,7 @@ function Ask() {
           )}
 
           <div className="mt-8 w-full space-y-2">
-            {prompts.map((p) => (
+            {activePrompts.map((p) => (
               <button
                 key={p}
                 type="button"
@@ -118,13 +218,53 @@ function Ask() {
         </section>
       ) : (
         <section className="mt-8 space-y-4">
-          {msgs.map((m, i) =>
+          {msgs.map((m) =>
             m.role === "user" ? (
-              <p key={i} className="rise ml-auto w-fit max-w-[85%] rounded-[20px] rounded-br-md bg-foreground px-4 py-2.5 text-sm text-background">
+              <p key={m.id} className="rise ml-auto w-fit max-w-[85%] rounded-[20px] rounded-br-md bg-foreground px-4 py-2.5 text-sm text-background">
                 {m.text}
               </p>
+            ) : m.status === "pending" ? (
+              <div key={m.id} className="rise" data-testid="ask-thinking">
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                  <span className="orb h-5 w-5 rounded-full animate-pulse" /> Snippet is thinking...
+                </div>
+              </div>
+            ) : m.status === "processing" ? (
+              <div key={m.id} className="rise rounded-2xl border border-border bg-card/60 p-4" data-answer-kind="processing">
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold">
+                  <span className="orb h-5 w-5 rounded-full" /> Snippet
+                </div>
+                <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{m.text}</p>
+              </div>
+            ) : m.status === "error" ? (
+              <div key={m.id} className="rise rounded-2xl border border-destructive/30 bg-destructive/10 p-4">
+                <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-destructive">
+                  <AlertCircle className="h-4 w-4" /> Unable to process question
+                </div>
+                <p className="text-xs text-muted-foreground">{m.errorMessage}</p>
+                {m.queryToRetry && (
+                  <button
+                    type="button"
+                    onClick={() => send(m.queryToRetry!)}
+                    disabled={loading}
+                    className="press mt-3 inline-flex items-center gap-1.5 rounded-full bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-50"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" /> Retry question
+                  </button>
+                )}
+              </div>
+            ) : m.status === "unsupported" ? (
+              <div key={m.id} className="rise rounded-2xl border border-dashed border-border bg-card/60 p-4">
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                  <span className="orb h-5 w-5 rounded-full" /> Snippet
+                </div>
+                <p className="text-sm font-medium text-foreground">{m.text}</p>
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  This answer is not in the course materials currently uploaded for {selectedSubjectName}. Try rephrasing or asking about a topic covered in the syllabus.
+                </p>
+              </div>
             ) : (
-              <div key={i} className="rise">
+              <div key={m.id} className="rise">
                 <div className="mb-2 flex items-center gap-2 text-xs font-semibold">
                   <span className="orb h-5 w-5 rounded-full" /> Snippet
                 </div>
@@ -134,20 +274,13 @@ function Ask() {
                     {m.sources.map((s, idx) => (
                       <span key={idx} className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] text-muted-foreground">
                         <FileText className="h-3 w-3" />
-                        {s.filename} · p.{s.pageNumber}
+                        {s.filename || s.resource_name} {s.pageNumber ? `· p.${s.pageNumber}` : ""}
                       </span>
                     ))}
                   </div>
                 )}
               </div>
             ),
-          )}
-          {loading && (
-            <div className="rise">
-              <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-                <span className="orb h-5 w-5 rounded-full animate-pulse" /> Snippet is thinking...
-              </div>
-            </div>
           )}
         </section>
       )}

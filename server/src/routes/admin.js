@@ -156,4 +156,111 @@ router.get('/logs', authenticate, authorize('admin'), async (req, res) => {
   }
 });
 
+// GET /api/admin/analytics — comprehensive ERP analytics and insights
+router.get('/analytics', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const [overview, attendanceOverall, atRiskStudents, subjectPerformance, gradeDistribution, aiPerformance] = await Promise.all([
+      // 1. Overview counts & averages
+      pool.query(`
+        SELECT
+          (SELECT COUNT(*) FROM users WHERE role = 'student' AND is_active = true) AS student_count,
+          (SELECT COUNT(*) FROM users WHERE role = 'faculty' AND is_active = true) AS faculty_count,
+          (SELECT COUNT(*) FROM subjects) AS subject_count,
+          (SELECT COUNT(*) FROM academic_classes) AS class_count,
+          (SELECT ROUND(AVG(total_marks)::numeric, 1) FROM academic_results WHERE total_marks IS NOT NULL AND status = 'published') AS avg_marks,
+          (SELECT ROUND(AVG(grade_points)::numeric, 2) FROM academic_results WHERE grade_points IS NOT NULL AND status = 'published') AS avg_cgpa
+      `),
+
+      // 2. Attendance summary
+      pool.query(`
+        SELECT
+          COUNT(*) AS total_records,
+          COUNT(*) FILTER (WHERE status = 'present') AS present_records,
+          COUNT(*) FILTER (WHERE status = 'absent') AS absent_records,
+          COUNT(*) FILTER (WHERE corrected_at IS NOT NULL) AS corrected_records,
+          CASE WHEN COUNT(*) > 0
+               THEN ROUND((COUNT(*) FILTER (WHERE status = 'present')::numeric / COUNT(*)::numeric) * 100, 1)
+               ELSE 100.0 END AS overall_rate
+        FROM attendance_records
+      `),
+
+      // 3. At-risk students (attendance < 75% or failing marks)
+      pool.query(`
+        SELECT
+          u.id AS student_id,
+          u.full_name,
+          u.email,
+          p.roll_number,
+          COUNT(ar.id) AS total_sessions,
+          COUNT(ar.id) FILTER (WHERE ar.status = 'present') AS attended_sessions,
+          CASE WHEN COUNT(ar.id) > 0
+               THEN ROUND((COUNT(ar.id) FILTER (WHERE ar.status = 'present')::numeric / COUNT(ar.id)::numeric) * 100, 1)
+               ELSE 100.0 END AS attendance_percentage,
+          ROUND(AVG(r.grade_points)::numeric, 2) AS cgpa
+        FROM users u
+        LEFT JOIN user_profiles p ON p.user_id = u.id
+        LEFT JOIN attendance_records ar ON ar.student_id = u.id
+        LEFT JOIN academic_results r ON r.student_id = u.id AND r.status = 'published'
+        WHERE u.role = 'student' AND u.is_active = true
+        GROUP BY u.id, u.full_name, u.email, p.roll_number
+        HAVING (COUNT(ar.id) > 0 AND (COUNT(ar.id) FILTER (WHERE ar.status = 'present')::numeric / COUNT(ar.id)::numeric) < 0.75)
+            OR (AVG(r.grade_points) IS NOT NULL AND AVG(r.grade_points) < 5.0)
+        ORDER BY attendance_percentage ASC
+        LIMIT 20
+      `),
+
+      // 4. Subject performance
+      pool.query(`
+        SELECT
+          s.id,
+          s.name,
+          s.code,
+          COUNT(r.id) AS total_results,
+          ROUND(AVG(r.total_marks)::numeric, 1) AS avg_marks,
+          ROUND(AVG(r.grade_points)::numeric, 2) AS avg_gpa,
+          CASE WHEN COUNT(r.id) > 0
+               THEN ROUND((COUNT(r.id) FILTER (WHERE r.grade NOT IN ('F', 'XX', 'AB'))::numeric / COUNT(r.id)::numeric) * 100, 1)
+               ELSE 100.0 END AS pass_percentage
+        FROM subjects s
+        LEFT JOIN academic_results r ON r.subject_id = s.id AND r.status = 'published'
+        GROUP BY s.id, s.name, s.code
+        ORDER BY s.name ASC
+      `),
+
+      // 5. Grade distribution
+      pool.query(`
+        SELECT
+          grade,
+          COUNT(*) AS count
+        FROM academic_results
+        WHERE status = 'published' AND grade IS NOT NULL
+        GROUP BY grade
+        ORDER BY grade ASC
+      `),
+
+      // 6. AI assistance telemetry
+      pool.query(`
+        SELECT
+          COUNT(*) AS total_queries,
+          COUNT(*) FILTER (WHERE was_found = true) AS successful_queries,
+          COUNT(*) FILTER (WHERE was_found = false) AS fallback_queries,
+          ROUND(AVG(response_time_ms)) AS avg_response_ms
+        FROM ai_audit_logs
+      `),
+    ]);
+
+    res.json({
+      overview: overview.rows[0],
+      attendance: attendanceOverall.rows[0],
+      atRiskStudents: atRiskStudents.rows,
+      subjectPerformance: subjectPerformance.rows,
+      gradeDistribution: gradeDistribution.rows,
+      aiMetrics: aiPerformance.rows[0],
+    });
+  } catch (err) {
+    console.error('Analytics endpoint error:', err);
+    res.status(500).json({ error: 'Failed to retrieve analytics data' });
+  }
+});
+
 module.exports = router;

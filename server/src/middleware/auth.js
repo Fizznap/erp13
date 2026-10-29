@@ -138,15 +138,21 @@ const authenticateOnboarding = createAuthenticate({
  * @param  {...string} roles - Allowed roles
  */
 function authorize(...roles) {
+  const allowed = roles.flat();
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required' });
     }
-    if (!roles.includes(req.user.role)) {
+    if (!allowed.includes(req.user.role)) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
     next();
   };
+}
+
+function requireRole(roles) {
+  const allowed = Array.isArray(roles) ? roles : [roles];
+  return authorize(...allowed);
 }
 
 /**
@@ -169,4 +175,4 @@ function optionalAuth(req, res, next) {
   next();
 }
 
-module.exports = { authenticate, authenticateForProfile, authenticateOnboarding, authorize, optionalAuth, isProfileComplete };
+module.exports = { authenticate, authenticateForProfile, authenticateOnboarding, authorize, requireRole, optionalAuth, isProfileComplete };

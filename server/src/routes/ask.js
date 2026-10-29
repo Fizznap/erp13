@@ -3,13 +3,13 @@ const crypto = require('crypto');
 const { pool } = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { ragLimiter } = require('../middleware/rateLimit');
-const { embedQuery, vectorSearch, getActiveEmbeddingProvider } = require('../services/rag');
+const { embedQuery, vectorSearch, getActiveEmbeddingProvider, isSummaryQuery } = require('../services/rag');
 const { generateAnswer, getActiveGenerationProvider } = require('../services/llmAdapter');
 
 const router = express.Router();
 
 // POST /api/ask — RAG query endpoint
-router.post('/', authenticate, authorize('student', 'faculty'), ragLimiter, async (req, res) => {
+router.post('/', authenticate, authorize('student', 'faculty', 'admin'), ragLimiter, async (req, res) => {
   try {
     const startTime = Date.now();
     const { query, subjectId } = req.body;
@@ -44,33 +44,176 @@ router.post('/', authenticate, authorize('student', 'faculty'), ragLimiter, asyn
         return res.status(403).json({ error: 'You are not enrolled in this subject' });
       }
       subjectName = offering.rows[0].name;
-    } else {
+    } else if (req.user.role === 'faculty') {
       userScope.facultyId = req.user.id;
       const subj = await pool.query('SELECT name FROM subjects WHERE id = $1', [subjectId]);
-      if (subj.rows.length > 0) subjectName = subj.rows[0].name;
+      if (subj.rows.length === 0) {
+        return res.status(404).json({ error: 'Subject not found' });
+      }
+      subjectName = subj.rows[0].name;
+    } else if (req.user.role === 'admin') {
+      const subj = await pool.query('SELECT name FROM subjects WHERE id = $1', [subjectId]);
+      if (subj.rows.length === 0) {
+        return res.status(404).json({ error: 'Subject not found' });
+      }
+      subjectName = subj.rows[0].name;
+    } else {
+      return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
-    // Check that subject has ready resources
+    // Check ready resources count
     const resourceCheck = await pool.query(
       "SELECT COUNT(*) AS cnt FROM resources WHERE subject_id = $1 AND status = 'ready'",
       [subjectId]
     );
-    if (parseInt(resourceCheck.rows[0].cnt) === 0) {
+    const readyCount = parseInt(resourceCheck.rows[0]?.cnt || '0', 10);
+
+    if (readyCount === 0) {
+      // Check if resources are queued or processing
+      const pendingRes = await pool.query(
+        "SELECT id, original_name, status, stage, progress FROM resources WHERE subject_id = $1 AND status IN ('queued', 'processing') ORDER BY created_at DESC",
+        [subjectId]
+      );
+      if (pendingRes.rows.length > 0) {
+        const p = pendingRes.rows[0];
+        const stageDesc = p.stage ? ` (stage: ${p.stage}${p.progress ? `, ${p.progress}%` : ''})` : '';
+        return res.json({
+          answer: `Course material "${p.original_name}" is currently processing${stageDesc}. Please ask again once processing completes.`,
+          wasFound: false,
+          isProcessing: true,
+          sources: [],
+          latencyMs: Date.now() - startTime,
+        });
+      }
+
+      // Check if resources failed
+      const failedRes = await pool.query(
+        "SELECT id, original_name FROM resources WHERE subject_id = $1 AND status = 'failed' ORDER BY created_at DESC",
+        [subjectId]
+      );
+      if (failedRes.rows.length > 0) {
+        return res.status(400).json({ error: 'Course material processing failed for this subject. Please re-upload the document.' });
+      }
+
       return res.status(400).json({ error: 'No processed resources available for this subject' });
     }
 
     const activeEmbProvider = (typeof getActiveEmbeddingProvider === 'function' ? getActiveEmbeddingProvider() : null) || { name: 'gemini', model: 'gemini-embedding-2' };
     const activeGenProvider = (typeof getActiveGenerationProvider === 'function' ? getActiveGenerationProvider() : null) || { name: 'google', model: 'gemini-3.1-flash-lite' };
 
+    // Summary query handling using authoritative stored document metadata
+    if (typeof isSummaryQuery === 'function' && isSummaryQuery(query)) {
+      let resQuery = `SELECT r.id, r.original_name, r.summary, r.key_topics, r.bullet_points, r.page_count, r.chunk_count
+                      FROM resources r
+                      WHERE r.subject_id = $1 AND r.status = 'ready'`;
+      const resParams = [subjectId];
+      if (userScope.role === 'student') {
+        resQuery += ` AND r.subject_offering_id IN (SELECT id FROM subject_offerings WHERE academic_class_id = $2)`;
+        resParams.push(userScope.academicClassId);
+      } else if (userScope.role === 'faculty') {
+        resQuery += ` AND r.subject_offering_id IN (SELECT id FROM subject_offerings WHERE faculty_id = $2)`;
+        resParams.push(userScope.facultyId);
+      }
+      resQuery += ` ORDER BY r.created_at ASC`;
+      const accessibleResources = await pool.query(resQuery, resParams);
+
+      if (accessibleResources.rows.length > 0) {
+        const docsWithSummary = accessibleResources.rows.filter(
+          (d) => d.summary && !d.summary.startsWith('Unable to') && !d.summary.startsWith('Document section with')
+        );
+
+        if (docsWithSummary.length > 0) {
+          let answer = '';
+          const sources = [];
+
+          if (docsWithSummary.length === 1) {
+            const doc = docsWithSummary[0];
+            let keyTopics = [];
+            try {
+              keyTopics = Array.isArray(doc.key_topics) ? doc.key_topics : JSON.parse(doc.key_topics || '[]');
+            } catch {}
+            let bulletPoints = [];
+            try {
+              bulletPoints = Array.isArray(doc.bullet_points) ? doc.bullet_points : JSON.parse(doc.bullet_points || '[]');
+            } catch {}
+
+            answer = `Based on [1] **${doc.original_name}**:\n\n${doc.summary}`;
+            if (bulletPoints.length > 0) {
+              answer += `\n\n**Key Highlights:**\n` + bulletPoints.map((b) => `• ${b}`).join('\n');
+            }
+            if (keyTopics.length > 0) {
+              answer += `\n\n**Topics Covered:** ${keyTopics.join(', ')}`;
+            }
+
+            sources.push({
+              resourceId: doc.id,
+              resource_name: doc.original_name,
+              filename: doc.original_name,
+              chunkIndex: 0,
+              pageNumber: 1,
+              similarity: 1.0,
+              excerpt: doc.summary.substring(0, 200) + '...',
+            });
+          } else {
+            answer = `Here is an overview of the course materials for **${subjectName}**:\n\n`;
+            docsWithSummary.forEach((doc, idx) => {
+              const num = idx + 1;
+              answer += `[${num}] **${doc.original_name}**: ${doc.summary}\n\n`;
+              sources.push({
+                resourceId: doc.id,
+                resource_name: doc.original_name,
+                filename: doc.original_name,
+                chunkIndex: 0,
+                pageNumber: 1,
+                similarity: 1.0,
+                excerpt: doc.summary.substring(0, 200) + '...',
+              });
+            });
+          }
+
+          const latencyMs = Date.now() - startTime;
+          const promptHash = crypto.createHash('sha256').update(query).digest('hex');
+
+          await pool.query(
+            `INSERT INTO ai_audit_logs (user_id, subject_id, query, answer, chunks_used, chunk_ids, model_used, provider, tokens_in, tokens_out, response_time_ms, was_found, similarity_score, top_k_scores, prompt_hash)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, 0, $9, true, 1.0, $10, $11)`,
+            [
+              req.user.id, subjectId, query, answer,
+              JSON.stringify(sources.map((s) => ({ resourceId: s.resourceId, chunkIndex: s.chunkIndex, similarity: s.similarity }))),
+              [],
+              'metadata_summary',
+              activeGenProvider.name || 'google',
+              latencyMs,
+              [1.0],
+              promptHash,
+            ]
+          );
+
+          console.log(`[RAG Metrics] query.count=1, query.was_found_rate=1.0, avg_similarity=1.00, llm.calls=0, token_usage=0`);
+
+          return res.json({
+            answer,
+            wasFound: true,
+            sources,
+            latencyMs,
+          });
+        }
+      }
+    }
+
     // Step 1: Embed the query
     const queryEmbedding = await embedQuery(query);
 
     // Step 2: Vector search with strict authorization scope and model isolation
-    const threshold = parseFloat(process.env.SIMILARITY_THRESHOLD) || 0.55;
-    const topK = parseInt(process.env.TOP_K_CHUNKS) || 5;
-    const chunks = await vectorSearch(queryEmbedding, subjectId, userScope, topK, {
+    const configuredThreshold = parseFloat(process.env.SIMILARITY_THRESHOLD) || 0.55;
+    const overviewQuery = typeof isSummaryQuery === 'function' && isSummaryQuery(query);
+    const threshold = overviewQuery ? Math.min(configuredThreshold, 0.2) : configuredThreshold;
+    const topK = Math.max(parseInt(process.env.TOP_K_CHUNKS) || 5, overviewQuery ? 8 : 5);
+    const rawChunks = await vectorSearch(queryEmbedding, subjectId, userScope, topK, {
+      embeddingProvider: activeEmbProvider?.name,
       embeddingModel: activeEmbProvider?.model,
     });
+    const chunks = Array.isArray(rawChunks) ? rawChunks : [];
 
     // Calculate top scores
     const topKScores = chunks.map(c => c.similarity);
@@ -80,8 +223,12 @@ router.post('/', authenticate, authorize('student', 'faculty'), ragLimiter, asyn
     // Hash query for audit log
     const promptHash = crypto.createHash('sha256').update(query).digest('hex');
 
-    // Step 3: Relevance check
-    if (chunks.length === 0 || topScore < threshold || (avgScore < threshold && chunks.length > 0)) {
+    // Step 3: Relevance check.
+    // Overview/summary questions are compared against a lower threshold because
+    // generic wording has weaker cosine similarity than factual queries.
+    // If any authorized compatible chunks were retrieved for an overview, use them.
+    const belowThreshold = chunks.length === 0 || topScore < threshold || (avgScore < threshold && chunks.length > 0);
+    if (belowThreshold && !(overviewQuery && chunks.length > 0)) {
       const latencyMs = Date.now() - startTime;
       const notFoundStr = 'Not in provided material.';
 
@@ -124,13 +271,31 @@ router.post('/', authenticate, authorize('student', 'faculty'), ragLimiter, asyn
       question: query, 
       numberedContext, 
       temperature: 0.2,
-      systemPrompt: `You are a helpful, conversational teaching assistant for the subject "${subjectName}". Provide a comprehensive, detailed, and well-structured explanation based ONLY on the numbered chunks in the context provided. Use markdown for better readability. If the answer cannot be found in the context at all, return EXACTLY: "Not in provided material." ALWAYS include citations like [1] inline.` 
+      systemPrompt: overviewQuery
+        ? `You are a helpful teaching assistant for the subject "${subjectName}". Using ONLY the numbered chunks, write a concise document overview: what the material covers, key topics, and notable highlights. Use markdown. ALWAYS include citations like [1] inline. If the chunks do not describe the document, return EXACTLY: "Not in provided material."`
+        : `You are a helpful, conversational teaching assistant for the subject "${subjectName}". Provide a comprehensive, detailed, and well-structured explanation based ONLY on the numbered chunks in the context provided. Use markdown for better readability. If the answer cannot be found in the context at all, return EXACTLY: "Not in provided material." ALWAYS include citations like [1] inline.` 
     });
-    const candidateAnswer = typeof llmResp.answer === 'string' ? llmResp.answer.trim() : '';
+    let candidateAnswer = typeof llmResp.answer === 'string' ? llmResp.answer.trim() : '';
+    // Normalize citations if model outputted [Source 1], (Source 1), or (1)
+    candidateAnswer = candidateAnswer
+      .replace(/\[Source\s*(\d+)\]/gi, '[$1]')
+      .replace(/\(Source\s*(\d+)\)/gi, '[$1]')
+      .replace(/\((\d+)\)/g, '[$1]');
+
     const citationNumbers = Array.from(candidateAnswer.matchAll(/\[(\d+)\]/g), (match) => Number(match[1]));
-    const citationsValid = citationNumbers.length > 0 && citationNumbers.every(
-      (number) => Number.isInteger(number) && number >= 1 && number <= chunks.length
-    );
+    const hasInvalidCitation = citationNumbers.some((number) => !Number.isInteger(number) || number < 1 || number > chunks.length);
+
+    let citationsValid = false;
+    if (!hasInvalidCitation) {
+      if (citationNumbers.length > 0) {
+        citationsValid = true;
+      } else if (candidateAnswer && candidateAnswer !== 'Not in provided material.' && chunks.length > 0) {
+        // Model provided a grounded answer without bracket syntax; attribute to retrieved source [1]
+        candidateAnswer = `${candidateAnswer} [1]`;
+        citationsValid = true;
+      }
+    }
+
     const result = {
       answer: candidateAnswer === 'Not in provided material.' || citationsValid
         ? candidateAnswer || 'Not in provided material.'

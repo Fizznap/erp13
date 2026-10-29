@@ -1,19 +1,16 @@
 const VITE_API_URL = import.meta.env["VITE_API_URL"] as string | undefined;
-// If VITE_API_URL is provided (e.g. https://snippet-api.onrender.com), we append /api.
-// If it already ends with /api, we keep it as is.
-export const getApiBase = () => {
-  if (VITE_API_URL) {
-    const trimmed = VITE_API_URL.trim().replace(/\/+$/, "");
-    return trimmed.endsWith("/api") ? trimmed : `${trimmed}/api`;
-  }
-  if (
-    import.meta.env.PROD ||
-    (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1")
-  ) {
-    return "https://snippet-api-pf9m.onrender.com/api";
-  }
-  return "http://localhost:3001/api";
-};
+
+/**
+ * Normalize a configured API origin so callers can pass either
+ * `https://host.example` or `https://host.example/api` without producing `/api/api`.
+ */
+export function normalizeApiBase(rawUrl?: string | null, fallback = "http://localhost:3001/api"): string {
+  if (!rawUrl || !String(rawUrl).trim()) return fallback;
+  const trimmed = String(rawUrl).trim().replace(/\/+$/, "");
+  return /\/api$/i.test(trimmed) ? trimmed : `${trimmed}/api`;
+}
+
+export const getApiBase = () => normalizeApiBase(VITE_API_URL);
 export const API_BASE = getApiBase();
 
 type RequestOptions = {
