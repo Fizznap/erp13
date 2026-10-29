@@ -210,3 +210,8 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTA
 ALTER TABLE subjects ALTER COLUMN faculty_id DROP NOT NULL;
 ALTER TABLE resources ADD COLUMN IF NOT EXISTS subject_offering_id UUID REFERENCES subject_offerings(id);
 ALTER TABLE attendance_sessions ADD COLUMN IF NOT EXISTS subject_offering_id UUID REFERENCES subject_offerings(id);
+ALTER TABLE resources ADD COLUMN IF NOT EXISTS embedding_provider VARCHAR(50) DEFAULT 'gemini';
+ALTER TABLE resources ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(100) DEFAULT 'gemini-embedding-2';
+ALTER TABLE resource_chunks ADD COLUMN IF NOT EXISTS embedding_provider VARCHAR(50) DEFAULT 'gemini';
+ALTER TABLE resource_chunks ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(100) DEFAULT 'gemini-embedding-2';
+

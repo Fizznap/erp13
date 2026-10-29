@@ -1,11 +1,13 @@
 const { pool } = require('../db/pool');
+const { getEmbeddingProvider, getGenerationProvider, resolveEmbeddingProviderName, resolveGenerationProviderName } = require('./providers');
 require('dotenv').config();
 
-const GOOGLE_AI_API_KEY = process.env.GOOGLE_AI_API_KEY;
-const EMBEDDING_MODEL = 'gemini-embedding-2';
-const GENERATION_MODEL = process.env.GOOGLE_AI_MODEL || 'gemini-3.1-flash-lite';
+const GOOGLE_AI_API_KEY = () => process.env.GOOGLE_AI_API_KEY;
+const EMBEDDING_MODEL = () => process.env.GOOGLE_AI_EMBEDDING_MODEL || 'gemini-embedding-2';
+const GENERATION_MODEL = () => process.env.GOOGLE_AI_MODEL || 'gemini-3.1-flash-lite';
 const GOOGLE_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-const API_BASE = (() => {
+
+function getApiBase() {
   const override = process.env.GOOGLE_AI_API_BASE_URL;
   if (!override) return GOOGLE_API_BASE;
   if (process.env.NODE_ENV !== 'test') {
@@ -16,28 +18,42 @@ const API_BASE = (() => {
     throw new Error('Test Gemini API base must be a local HTTP URL');
   }
   return `${url.origin}${url.pathname.replace(/\/$/, '')}`;
-})();
-const API_TIMEOUT_MS = Math.max(1000, Number(process.env.GOOGLE_AI_TIMEOUT_MS) || 30000);
+}
+
+function getApiTimeoutMs() {
+  return Math.max(1000, Number(process.env.GOOGLE_AI_TIMEOUT_MS) || 30000);
+}
 
 function fetchGoogleApi(url, options) {
-  return fetch(url, { ...options, signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+  const fetchFn = typeof globalThis.fetch === 'function' ? globalThis.fetch : require('node-fetch');
+  return fetchFn(url, { ...options, signal: AbortSignal.timeout(getApiTimeoutMs()) });
 }
 
 /**
- * Embed a single text string using Google's embedding model.
- * Returns a 768-dimensional float array.
+ * Embed a single text string.
+ * Routes to active provider (Gemini or Ollama).
  */
 async function embedText(text) {
-  if (!GOOGLE_AI_API_KEY) throw new Error('GOOGLE_AI_API_KEY is not configured');
+  const providerName = resolveEmbeddingProviderName();
+  if (providerName === 'ollama') {
+    return getEmbeddingProvider('ollama').embedText(text);
+  }
+
+  // Gemini implementation
+  const apiKey = GOOGLE_AI_API_KEY();
+  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY is not configured');
+  const apiBase = getApiBase();
+  const embModel = EMBEDDING_MODEL();
+
   const response = await fetchGoogleApi(
-    `${API_BASE}/models/${EMBEDDING_MODEL}:embedContent`,
+    `${apiBase}/models/${embModel}:embedContent`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GOOGLE_AI_API_KEY },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
-        model: `models/${EMBEDDING_MODEL}`,
+        model: `models/${embModel}`,
         content: { parts: [{ text }] },
-        outputDimensionality: 768
+        outputDimensionality: 768,
       }),
     }
   );
@@ -51,21 +67,32 @@ async function embedText(text) {
 }
 
 /**
- * Batch embed multiple texts. Google API supports batch embedding.
+ * Batch embed multiple texts.
+ * Routes to active provider (Gemini or Ollama).
  */
 async function embedBatch(texts) {
-  if (!GOOGLE_AI_API_KEY) throw new Error('GOOGLE_AI_API_KEY is not configured');
+  const providerName = resolveEmbeddingProviderName();
+  if (providerName === 'ollama') {
+    return getEmbeddingProvider('ollama').embedBatch(texts);
+  }
+
+  // Gemini implementation
+  const apiKey = GOOGLE_AI_API_KEY();
+  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY is not configured');
+  const apiBase = getApiBase();
+  const embModel = EMBEDDING_MODEL();
+
   const requests = texts.map((text) => ({
-    model: `models/${EMBEDDING_MODEL}`,
+    model: `models/${embModel}`,
     content: { parts: [{ text }] },
-    outputDimensionality: 768
+    outputDimensionality: 768,
   }));
 
   const response = await fetchGoogleApi(
-    `${API_BASE}/models/${EMBEDDING_MODEL}:batchEmbedContents`,
+    `${apiBase}/models/${embModel}:batchEmbedContents`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GOOGLE_AI_API_KEY },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({ requests }),
     }
   );
@@ -88,8 +115,9 @@ async function embedQuery(query) {
 /**
  * Perform vector similarity search against resource_chunks within a subject.
  * STRICT RAG: Authorized by academic class (student) or assignment (faculty).
+ * Protects embedding space compatibility by filtering on embedding_model if requested.
  */
-async function vectorSearch(queryEmbedding, subjectId, userScope, topK = 5) {
+async function vectorSearch(queryEmbedding, subjectId, userScope, topK = 5, options = {}) {
   const vectorStr = `[${queryEmbedding.join(',')}]`;
 
   let authFilter = '';
@@ -103,6 +131,18 @@ async function vectorSearch(queryEmbedding, subjectId, userScope, topK = 5) {
     params.push(userScope.facultyId);
   }
 
+  // Model isolation filter to avoid cross-embedding corruption
+  let modelFilter = '';
+  const targetModel = options.embeddingModel;
+  if (targetModel) {
+    params.push(targetModel);
+    if (targetModel.startsWith('gemini')) {
+      modelFilter = `AND (rc.embedding_model IS NULL OR rc.embedding_model = $${params.length})`;
+    } else {
+      modelFilter = `AND rc.embedding_model = $${params.length}`;
+    }
+  }
+
   const result = await pool.query(
     `SELECT rc.*, r.original_name, r.subject_id,
             1 - (rc.embedding <=> $1::vector) AS similarity
@@ -110,6 +150,7 @@ async function vectorSearch(queryEmbedding, subjectId, userScope, topK = 5) {
      JOIN resources r ON r.id = rc.resource_id
      WHERE r.subject_id = $2 AND r.status = 'ready'
      ${authFilter}
+     ${modelFilter}
      ORDER BY rc.embedding <=> $1::vector
      LIMIT $3`,
     params
@@ -119,12 +160,32 @@ async function vectorSearch(queryEmbedding, subjectId, userScope, topK = 5) {
 }
 
 /**
- * Generate an answer from retrieved chunks using Gemini.
+ * Generate an answer from retrieved chunks.
+ * Routes to active provider (Gemini or Ollama).
  * Strict RAG — answer ONLY from provided context.
  */
-async function generateAnswer(query, chunks, subjectName) {
-  if (!GOOGLE_AI_API_KEY) throw new Error('GOOGLE_AI_API_KEY is not configured');
-  // Build context from chunks
+async function generateAnswer(query, chunks, subjectName, options = {}) {
+  const genProviderName = resolveGenerationProviderName();
+  if (genProviderName === 'ollama') {
+    const ollama = getGenerationProvider('ollama');
+    const numberedContext = chunks.map((c, i) => ({
+      n: i + 1,
+      label: `${c.original_name} | page:${c.page_number || 'n/a'} | chunk:${c.chunk_index}`,
+      text: c.content,
+    }));
+    return ollama.generateAnswer({
+      question: query,
+      numberedContext,
+      systemPrompt: `You are a strict assistant. Answer ONLY using the numbered chunks in the context. If the answer cannot be found in the context, return EXACTLY: "Not in provided material." Include citations like [1] inline. Be concise.`,
+    });
+  }
+
+  // Gemini implementation
+  const apiKey = GOOGLE_AI_API_KEY();
+  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY is not configured');
+  const apiBase = getApiBase();
+  const genModel = GENERATION_MODEL();
+
   const context = chunks
     .map((c, i) =>
       `[${i + 1}] ${c.original_name} | page:${c.page_number || 'n/a'} | chunk:${c.chunk_index}\n${c.content.slice(0, 1200)}`
@@ -133,21 +194,13 @@ async function generateAnswer(query, chunks, subjectName) {
 
   const systemPrompt = `You are a strict assistant. Answer ONLY using the numbered chunks in the context. If the answer cannot be found in the context, return EXACTLY: "Not in provided material." Include citations like [1] inline. Be concise.`;
 
-  const userPrompt = `CONTEXT FROM COURSE MATERIALS:
-
-${context}
-
----
-
-STUDENT QUESTION: ${query}
-
-Answer using ONLY the context above. Cite sources as [Source N].`;
+  const userPrompt = `CONTEXT FROM COURSE MATERIALS:\n\n${context}\n\n---\n\nSTUDENT QUESTION: ${query}\n\nAnswer using ONLY the context above. Cite sources as [Source N].`;
 
   const response = await fetchGoogleApi(
-    `${API_BASE}/models/${GENERATION_MODEL}:generateContent`,
+    `${apiBase}/models/${genModel}:generateContent`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GOOGLE_AI_API_KEY },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
         systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -165,18 +218,17 @@ Answer using ONLY the context above. Cite sources as [Source N].`;
   const data = await response.json();
   let answer = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Failed to generate answer.';
   const usage = data.usageMetadata || {};
-  
+
   const notFoundExact = 'Not in provided material.';
-  
+
   // Enforce LLM reply must reference chunk numbers or exact NOT_FOUND
   if (!answer.includes(notFoundExact) && !/\[\d+\]/.test(answer)) {
-    // Treat as failure if no citation and not the exact fallback message
     answer = notFoundExact;
   }
 
   return {
     answer,
-    model: GENERATION_MODEL,
+    model: genModel,
     tokensIn: usage.promptTokenCount || 0,
     tokensOut: usage.candidatesTokenCount || 0,
   };
@@ -186,7 +238,17 @@ Answer using ONLY the context above. Cite sources as [Source N].`;
  * Generate metadata (summary, key topics, bullet points) from chunks.
  */
 async function generateMetadata(chunks) {
-  if (!GOOGLE_AI_API_KEY) throw new Error('GOOGLE_AI_API_KEY is not configured');
+  const genProviderName = resolveGenerationProviderName();
+  if (genProviderName === 'ollama') {
+    return getGenerationProvider('ollama').generateMetadata(chunks);
+  }
+
+  // Gemini implementation
+  const apiKey = GOOGLE_AI_API_KEY();
+  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY is not configured');
+  const apiBase = getApiBase();
+  const genModel = GENERATION_MODEL();
+
   const text = chunks.slice(0, 5).map((c) => c.content).join('\n\n');
 
   const prompt = `Analyze this academic content and provide:
@@ -205,10 +267,10 @@ Respond ONLY in this exact JSON format:
 }`;
 
   const response = await fetchGoogleApi(
-    `${API_BASE}/models/${GENERATION_MODEL}:generateContent`,
+    `${apiBase}/models/${genModel}:generateContent`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GOOGLE_AI_API_KEY },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
@@ -229,13 +291,20 @@ Respond ONLY in this exact JSON format:
   try {
     return JSON.parse(rawText);
   } catch {
-    // Try to extract JSON from text
     const jsonMatch = rawText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0]);
     }
     return { summary: 'Unable to generate summary.', keyTopics: [], bulletPoints: [] };
   }
+}
+
+function getActiveEmbeddingProvider() {
+  return getEmbeddingProvider();
+}
+
+function getActiveGenerationProvider() {
+  return getGenerationProvider();
 }
 
 module.exports = {
@@ -245,4 +314,6 @@ module.exports = {
   vectorSearch,
   generateAnswer,
   generateMetadata,
+  getActiveEmbeddingProvider,
+  getActiveGenerationProvider,
 };

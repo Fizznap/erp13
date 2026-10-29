@@ -3,8 +3,8 @@ const crypto = require('crypto');
 const { pool } = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { ragLimiter } = require('../middleware/rateLimit');
-const { embedQuery, vectorSearch } = require('../services/rag');
-const { generateAnswer } = require('../services/llmAdapter');
+const { embedQuery, vectorSearch, getActiveEmbeddingProvider } = require('../services/rag');
+const { generateAnswer, getActiveGenerationProvider } = require('../services/llmAdapter');
 
 const router = express.Router();
 
@@ -59,13 +59,18 @@ router.post('/', authenticate, authorize('student', 'faculty'), ragLimiter, asyn
       return res.status(400).json({ error: 'No processed resources available for this subject' });
     }
 
+    const activeEmbProvider = (typeof getActiveEmbeddingProvider === 'function' ? getActiveEmbeddingProvider() : null) || { name: 'gemini', model: 'gemini-embedding-2' };
+    const activeGenProvider = (typeof getActiveGenerationProvider === 'function' ? getActiveGenerationProvider() : null) || { name: 'google', model: 'gemini-3.1-flash-lite' };
+
     // Step 1: Embed the query
     const queryEmbedding = await embedQuery(query);
 
-    // Step 2: Vector search with strict authorization scope
+    // Step 2: Vector search with strict authorization scope and model isolation
     const threshold = parseFloat(process.env.SIMILARITY_THRESHOLD) || 0.55;
     const topK = parseInt(process.env.TOP_K_CHUNKS) || 5;
-    const chunks = await vectorSearch(queryEmbedding, subjectId, userScope, topK);
+    const chunks = await vectorSearch(queryEmbedding, subjectId, userScope, topK, {
+      embeddingModel: activeEmbProvider?.model,
+    });
 
     // Calculate top scores
     const topKScores = chunks.map(c => c.similarity);
@@ -90,7 +95,7 @@ router.post('/', authenticate, authorize('student', 'faculty'), ragLimiter, asyn
           JSON.stringify([]),
           [],
           'none',
-          'google',
+          activeGenProvider.name || 'google',
           latencyMs,
           topScore,
           topKScores,
@@ -130,7 +135,7 @@ router.post('/', authenticate, authorize('student', 'faculty'), ragLimiter, asyn
       answer: candidateAnswer === 'Not in provided material.' || citationsValid
         ? candidateAnswer || 'Not in provided material.'
         : 'Not in provided material.',
-      model: llmResp.model,
+      model: llmResp.model || activeGenProvider.model,
       tokensIn: llmResp.tokensIn,
       tokensOut: llmResp.tokensOut,
     };
@@ -159,8 +164,8 @@ router.post('/', authenticate, authorize('student', 'faculty'), ragLimiter, asyn
         req.user.id, subjectId, query, result.answer,
         JSON.stringify(sources.map(s => ({ resourceId: s.resourceId, chunkIndex: s.chunkIndex, similarity: s.similarity }))),
         chunkIds,
-        result.model || 'gemini-2.0-flash',
-        'google',
+        result.model || activeGenProvider.model || 'gemini-2.0-flash',
+        activeGenProvider.name || 'google',
         result.tokensIn || 0,
         result.tokensOut || 0,
         latencyMs,

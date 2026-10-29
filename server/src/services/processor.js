@@ -1,7 +1,7 @@
 const fs = require('fs');
 const pdf = require('pdf-parse');
 const { pool } = require('../db/pool');
-const { embedBatch, generateMetadata } = require('./rag');
+const { embedBatch, generateMetadata, getActiveEmbeddingProvider } = require('./rag');
 
 const EMBEDDING_DIMENSIONS = 768;
 
@@ -148,8 +148,13 @@ async function processResource(resourceId, job = null) {
     }
 
     // Step 3: Embed chunks in batches of 100
+    const activeProvider = typeof getActiveEmbeddingProvider === 'function'
+      ? getActiveEmbeddingProvider()
+      : { name: 'gemini', model: 'gemini-embedding-2', dimensions: EMBEDDING_DIMENSIONS };
+    const expectedDimensions = activeProvider.dimensions || EMBEDDING_DIMENSIONS;
+
     await updateProgress('EMBEDDING', 40);
-    console.log(`[Processor] Embedding ${textChunks.length} chunks...`);
+    console.log(`[Processor] Embedding ${textChunks.length} chunks using ${activeProvider.name} (${activeProvider.model})...`);
     const allEmbeddings = [];
     const batchSize = 100;
     for (let i = 0; i < textChunks.length; i += batchSize) {
@@ -157,9 +162,9 @@ async function processResource(resourceId, job = null) {
       const embeddings = await embedBatch(batch);
       if (!Array.isArray(embeddings) || embeddings.length !== batch.length ||
           embeddings.some((embedding) => !Array.isArray(embedding) ||
-            embedding.length !== EMBEDDING_DIMENSIONS ||
+            embedding.length !== expectedDimensions ||
             embedding.some((value) => !Number.isFinite(value)))) {
-        throw new Error(`Embedding provider returned invalid vectors (expected ${batch.length} vectors of ${EMBEDDING_DIMENSIONS} dimensions)`);
+        throw new Error(`Embedding provider returned invalid vectors (expected ${batch.length} vectors of ${expectedDimensions} dimensions)`);
       }
       allEmbeddings.push(...embeddings);
 
@@ -193,9 +198,9 @@ async function processResource(resourceId, job = null) {
 
         const vectorStr = `[${embedding.join(',')}]`;
         await pool.query(
-          `INSERT INTO resource_chunks (resource_id, chunk_index, content, token_count, page_number, heading, resource_name, embedding)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector)`,
-          [resourceId, i, chunkContent, tokenCount, pageNumber, chunkObj.heading, resource.original_name, vectorStr]
+          `INSERT INTO resource_chunks (resource_id, chunk_index, content, token_count, page_number, heading, resource_name, embedding, embedding_provider, embedding_model)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector, $9, $10)`,
+          [resourceId, i, chunkContent, tokenCount, pageNumber, chunkObj.heading, resource.original_name, vectorStr, activeProvider.name, activeProvider.model]
         );
       }
       storedChunkCount = textChunks.length;
@@ -228,20 +233,24 @@ async function processResource(resourceId, job = null) {
         bullet_points = $3,
         page_count = $4,
         chunk_count = $5,
+        embedding_provider = $6,
+        embedding_model = $7,
         error_message = NULL,
         processed_at = now()
-       WHERE id = $6`,
+       WHERE id = $8`,
       [
         metadata.summary,
         JSON.stringify(metadata.keyTopics || []),
         JSON.stringify(metadata.bulletPoints || []),
         pageCount,
         storedChunkCount,
+        activeProvider.name,
+        activeProvider.model,
         resourceId,
       ]
     );
 
-    console.log(`[Processor] Resource ${resourceId} processed successfully (${storedChunkCount} chunks stored)`);
+    console.log(`[Processor] Resource ${resourceId} processed successfully (${storedChunkCount} chunks stored with ${activeProvider.name})`);
     return { success: true, chunkCount: storedChunkCount };
   } catch (err) {
     console.error(`[Processor] Failed to process resource ${resourceId}:`, err);

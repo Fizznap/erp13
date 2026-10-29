@@ -13,6 +13,8 @@ describe('Gemini REST provider request handling', () => {
     originalApiKey = process.env.GOOGLE_AI_API_KEY;
     originalTimeout = process.env.GOOGLE_AI_TIMEOUT_MS;
     originalModel = process.env.GOOGLE_AI_MODEL;
+    process.env.EMBEDDING_PROVIDER = 'gemini';
+    process.env.LLM_PROVIDER = 'google';
     process.env.GOOGLE_AI_API_KEY = 'unit-test-key';
     process.env.GOOGLE_AI_TIMEOUT_MS = '1500';
     process.env.GOOGLE_AI_MODEL = 'gemini-3.1-flash-lite';
@@ -91,6 +93,8 @@ describe('Gemini REST provider request handling', () => {
     delete process.env.GOOGLE_AI_MODEL;
     jest.resetModules();
     require('dotenv').config({ path: require('path').resolve(__dirname, '../.env'), quiet: true });
+    process.env.LLM_PROVIDER = 'google';
+    process.env.EMBEDDING_PROVIDER = 'gemini';
     rag = require('../src/services/rag');
     global.fetch.mockResolvedValueOnce({
       ok: true,

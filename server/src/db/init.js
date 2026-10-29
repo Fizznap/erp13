@@ -37,6 +37,13 @@ async function initDatabase() {
     await pool.query(passwordResetTokensMigration);
     console.log('Password reset tokens schema is up to date.');
 
+    const embeddingMetadataMigration = fs.readFileSync(
+      path.join(__dirname, 'migration_06_embedding_provider_metadata.sql'),
+      'utf-8'
+    );
+    await pool.query(embeddingMetadataMigration);
+    console.log('Embedding provider metadata schema is up to date.');
+
     // Add subject_offering_id and new tracking columns to resources
     await pool.query(`
       ALTER TABLE resources ADD COLUMN IF NOT EXISTS subject_offering_id UUID REFERENCES subject_offerings(id) ON DELETE CASCADE;

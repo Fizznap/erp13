@@ -126,13 +126,41 @@ async function generateMock({ question, numberedContext, systemPrompt, temperatu
 async function generateAnswer({ question, numberedContext = [], systemPrompt = null, temperature = 0.0 }) {
   // Enforce a strict default system prompt if none provided
   const strictSystemPrompt = systemPrompt || `You are an academic assistant. Answer ONLY using the provided numbered context chunks. If the answer is not fully supported, return EXACTLY: "Not in provided material." Include numbered inline citations like [1]. Be concise.`;
-  if (PROVIDER === 'openai') {
+  const activeProvider = (process.env.LLM_PROVIDER || process.env.GENERATION_PROVIDER || PROVIDER).toLowerCase();
+
+  if (activeProvider === 'openai') {
     return generateOpenAI({ question, numberedContext, systemPrompt: strictSystemPrompt, temperature });
-  } else if (PROVIDER === 'google') {
+  } else if (activeProvider === 'google' || activeProvider === 'gemini') {
     return generateGoogle({ question, numberedContext, systemPrompt: strictSystemPrompt });
+  } else if (activeProvider === 'ollama') {
+    const { getGenerationProvider } = require('./providers');
+    const ollama = getGenerationProvider('ollama');
+    return ollama.generateAnswer({ question, numberedContext, systemPrompt: strictSystemPrompt, temperature });
   } else {
     return generateMock({ question, numberedContext, systemPrompt: strictSystemPrompt, temperature });
   }
 }
 
-module.exports = { generateAnswer };
+function getActiveGenerationProvider() {
+  const activeProvider = (process.env.LLM_PROVIDER || process.env.GENERATION_PROVIDER || PROVIDER).toLowerCase();
+  if (activeProvider === 'ollama') {
+    return {
+      name: 'ollama',
+      model: process.env.OLLAMA_GENERATION_MODEL || process.env.OLLAMA_MODEL || 'llama3.2',
+    };
+  } else if (activeProvider === 'openai') {
+    return {
+      name: 'openai',
+      model: process.env.OPENAI_CHAT_MODEL || 'gpt-4o-mini',
+    };
+  } else if (activeProvider === 'google' || activeProvider === 'gemini') {
+    return {
+      name: 'google',
+      model: process.env.GOOGLE_AI_MODEL || 'gemini-3.1-flash-lite',
+    };
+  }
+  return { name: 'mock', model: 'mock' };
+}
+
+module.exports = { generateAnswer, getActiveGenerationProvider };
+

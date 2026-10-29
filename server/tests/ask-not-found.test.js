@@ -4,6 +4,18 @@ const { generateAnswer } = require('../src/services/rag');
 global.fetch = jest.fn();
 
 describe('RAG Not Found Fallback', () => {
+  let originalEnv;
+
+  beforeEach(() => {
+    originalEnv = { ...process.env };
+    process.env.LLM_PROVIDER = 'google';
+    process.env.EMBEDDING_PROVIDER = 'gemini';
+    process.env.GOOGLE_AI_API_KEY = 'test-gemini-key';
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
   test('Query on unrelated text returns exact NOT_FOUND phrase and was_found=false', async () => {
     const subjectName = 'Math 101';
     

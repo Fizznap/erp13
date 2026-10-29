@@ -37,6 +37,15 @@ services:
       dockerfile: Dockerfile
     env_file:
       - server/.env
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - EMBEDDING_PROVIDER=ollama
+      - LLM_PROVIDER=ollama
+      - OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+      - OLLAMA_GENERATION_MODEL=llama3.2
+      - REDIS_URL=redis://redis:6379
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
@@ -56,6 +65,15 @@ services:
       dockerfile: Dockerfile
     env_file:
       - server/.env
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - EMBEDDING_PROVIDER=ollama
+      - LLM_PROVIDER=ollama
+      - OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+      - OLLAMA_GENERATION_MODEL=llama3.2
+      - REDIS_URL=redis://redis:6379
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy

@@ -13,6 +13,7 @@
     "db:seed": "node src/db/seed-admin.js",
     "db:seed:admin": "node src/db/seed-admin.js",
     "db:seed:students": "node src/db/seed-students.js",
+    "worker": "node src/services/worker.js",
     "test": "jest"
   },
   "dependencies": {

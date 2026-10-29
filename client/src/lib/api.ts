@@ -3,7 +3,8 @@ const VITE_API_URL = import.meta.env["VITE_API_URL"] as string | undefined;
 // If it already ends with /api, we keep it as is.
 export const getApiBase = () => {
   if (VITE_API_URL) {
-    return VITE_API_URL.endsWith("/api") ? VITE_API_URL : `${VITE_API_URL}/api`;
+    const trimmed = VITE_API_URL.trim().replace(/\/+$/, "");
+    return trimmed.endsWith("/api") ? trimmed : `${trimmed}/api`;
   }
   if (
     import.meta.env.PROD ||
